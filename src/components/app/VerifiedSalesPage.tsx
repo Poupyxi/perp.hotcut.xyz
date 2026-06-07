@@ -159,17 +159,17 @@ function primaryPrice(sale: VerifiedSale) {
 
 function secondaryPrice(sale: VerifiedSale) {
   if (typeof sale.paymentAmount === "number" && sale.paymentSymbol === "USDC" && typeof sale.priceUsd === "number") return fmtUsd(sale.priceUsd);
-  if (typeof sale.paymentAmount === "number" && sale.paymentSymbol === "SOL" && typeof sale.priceUsd !== "number") return "No USD conversion";
+  if (typeof sale.paymentAmount === "number" && sale.paymentSymbol === "SOL" && typeof sale.priceUsd !== "number") return "No USD";
   if (typeof sale.priceUsd === "number" && typeof sale.priceSol === "number") return fmtSol(sale.priceSol);
-  if (typeof sale.priceSol === "number" && sale.priceUsd === null) return "No USD conversion";
+  if (typeof sale.priceSol === "number" && sale.priceUsd === null) return "No USD";
   return "";
 }
 
 function priceGrowth(sale: VerifiedSale) {
   const sameSymbol = sale.paymentSymbol && sale.previousSaleSymbol && sale.paymentSymbol === sale.previousSaleSymbol;
   if (!sameSymbol || sale.priceChangeDirection === "unknown" || typeof sale.priceChangePercent !== "number") {
-    return { label: "No previous sale", amount: "", className: "text-muted-foreground" };
-  }
+  return { label: "No history", amount: "", className: "text-muted-foreground" };
+}
 
   const sign = sale.priceChangeDirection === "up" ? "+" : sale.priceChangeDirection === "down" ? "-" : "";
   const percent = `${sign}${Math.abs(sale.priceChangePercent).toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
@@ -326,8 +326,8 @@ export function VerifiedSalesPage() {
               const growth = priceGrowth(sale);
               return (
                 <tr key={sale.id} className="hover:bg-surface-raised/40 transition">
-                  <td className="px-5 py-3 text-center text-muted-foreground">
-                    <div className="flex items-center justify-center">
+                  <td className="w-[90px] px-5 py-3 text-center text-muted-foreground">
+                    <div className="flex w-full items-center justify-center">
                       {categoryIcon(sale.category) ? (
                         <img src={categoryIcon(sale.category) ?? ""} alt={categoryLabel(sale.category)} title={categoryLabel(sale.category)} className="h-6 w-6 rounded-sm object-contain" />
                       ) : (
