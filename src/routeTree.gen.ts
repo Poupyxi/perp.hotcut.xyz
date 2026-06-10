@@ -12,19 +12,24 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiVerifiedSalesRouteImport } from './routes/api.verified-sales'
+import { Route as ApiNftsRouteImport } from './routes/api.nfts'
+import { Route as ApiNftListRouteImport } from './routes/api.nft-list'
 import { Route as ApiMarketsRouteImport } from './routes/api.markets'
 import { Route as ApiMarketSalesRouteImport } from './routes/api.market-sales'
 import { Route as AppVerifiedSalesRouteImport } from './routes/_app.verified-sales'
 import { Route as AppSalesRouteImport } from './routes/_app.sales'
+import { Route as AppNftListRouteImport } from './routes/_app.nft-list'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppCollectionsRouteImport } from './routes/_app.collections'
 import { Route as ApiIndexPokemonRouteImport } from './routes/api.index.pokemon'
+import { Route as ApiVerifiedSalesLatestRouteImport } from './routes/api.verified-sales.latest'
 import { Route as ApiSalesLatestRouteImport } from './routes/api.sales.latest'
 import { Route as ApiRwaMarketStatsRouteImport } from './routes/api.rwa-market.stats'
 import { Route as ApiRwaMarketListedRouteImport } from './routes/api.rwa-market.listed'
 import { Route as ApiRwaMarketLatestSalesRouteImport } from './routes/api.rwa-market.latest-sales'
 import { Route as ApiRwaMarketEventsRouteImport } from './routes/api.rwa-market.events'
 import { Route as ApiRwaMarketEnrichSaleRouteImport } from './routes/api.rwa-market.enrich-sale'
+import { Route as ApiRefreshVerifiedSalesRouteImport } from './routes/api.refresh.verified-sales'
 import { Route as ApiProvidersStatusRouteImport } from './routes/api.providers.status'
 import { Route as ApiNftsUntrackRouteImport } from './routes/api.nfts.untrack'
 import { Route as ApiNftsTrackedRouteImport } from './routes/api.nfts.tracked'
@@ -39,6 +44,7 @@ import { Route as ApiSalesMarketMarketRouteImport } from './routes/api.sales.mar
 import { Route as ApiNftsCollectionsPreviewRouteImport } from './routes/api.nfts.collections.preview'
 import { Route as ApiNftsCollectionsIngestRouteImport } from './routes/api.nfts.collections.ingest'
 import { Route as ApiNftsCollectionsAllowedRouteImport } from './routes/api.nfts.collections.allowed'
+import { Route as ApiNftsAssetMintMarketStateRouteImport } from './routes/api.nfts.$assetMint.market-state'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -52,6 +58,16 @@ const IndexRoute = IndexRouteImport.update({
 const ApiVerifiedSalesRoute = ApiVerifiedSalesRouteImport.update({
   id: '/api/verified-sales',
   path: '/api/verified-sales',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNftsRoute = ApiNftsRouteImport.update({
+  id: '/api/nfts',
+  path: '/api/nfts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNftListRoute = ApiNftListRouteImport.update({
+  id: '/api/nft-list',
+  path: '/api/nft-list',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiMarketsRoute = ApiMarketsRouteImport.update({
@@ -74,6 +90,11 @@ const AppSalesRoute = AppSalesRouteImport.update({
   path: '/sales',
   getParentRoute: () => AppRoute,
 } as any)
+const AppNftListRoute = AppNftListRouteImport.update({
+  id: '/nft-list',
+  path: '/nft-list',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -88,6 +109,11 @@ const ApiIndexPokemonRoute = ApiIndexPokemonRouteImport.update({
   id: '/api/index/pokemon',
   path: '/api/index/pokemon',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiVerifiedSalesLatestRoute = ApiVerifiedSalesLatestRouteImport.update({
+  id: '/latest',
+  path: '/latest',
+  getParentRoute: () => ApiVerifiedSalesRoute,
 } as any)
 const ApiSalesLatestRoute = ApiSalesLatestRouteImport.update({
   id: '/api/sales/latest',
@@ -119,35 +145,40 @@ const ApiRwaMarketEnrichSaleRoute = ApiRwaMarketEnrichSaleRouteImport.update({
   path: '/api/rwa-market/enrich-sale',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRefreshVerifiedSalesRoute = ApiRefreshVerifiedSalesRouteImport.update({
+  id: '/api/refresh/verified-sales',
+  path: '/api/refresh/verified-sales',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiProvidersStatusRoute = ApiProvidersStatusRouteImport.update({
   id: '/api/providers/status',
   path: '/api/providers/status',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiNftsUntrackRoute = ApiNftsUntrackRouteImport.update({
-  id: '/api/nfts/untrack',
-  path: '/api/nfts/untrack',
-  getParentRoute: () => rootRouteImport,
+  id: '/untrack',
+  path: '/untrack',
+  getParentRoute: () => ApiNftsRoute,
 } as any)
 const ApiNftsTrackedRoute = ApiNftsTrackedRouteImport.update({
-  id: '/api/nfts/tracked',
-  path: '/api/nfts/tracked',
-  getParentRoute: () => rootRouteImport,
+  id: '/tracked',
+  path: '/tracked',
+  getParentRoute: () => ApiNftsRoute,
 } as any)
 const ApiNftsTrackRoute = ApiNftsTrackRouteImport.update({
-  id: '/api/nfts/track',
-  path: '/api/nfts/track',
-  getParentRoute: () => rootRouteImport,
+  id: '/track',
+  path: '/track',
+  getParentRoute: () => ApiNftsRoute,
 } as any)
 const ApiNftsStatusRoute = ApiNftsStatusRouteImport.update({
-  id: '/api/nfts/status',
-  path: '/api/nfts/status',
-  getParentRoute: () => rootRouteImport,
+  id: '/status',
+  path: '/status',
+  getParentRoute: () => ApiNftsRoute,
 } as any)
 const ApiNftsRefreshRoute = ApiNftsRefreshRouteImport.update({
-  id: '/api/nfts/refresh',
-  path: '/api/nfts/refresh',
-  getParentRoute: () => rootRouteImport,
+  id: '/refresh',
+  path: '/refresh',
+  getParentRoute: () => ApiNftsRoute,
 } as any)
 const AppCollectionsSlugRoute = AppCollectionsSlugRouteImport.update({
   id: '/$slug',
@@ -178,32 +209,41 @@ const ApiSalesMarketMarketRoute = ApiSalesMarketMarketRouteImport.update({
 } as any)
 const ApiNftsCollectionsPreviewRoute =
   ApiNftsCollectionsPreviewRouteImport.update({
-    id: '/api/nfts/collections/preview',
-    path: '/api/nfts/collections/preview',
-    getParentRoute: () => rootRouteImport,
+    id: '/collections/preview',
+    path: '/collections/preview',
+    getParentRoute: () => ApiNftsRoute,
   } as any)
 const ApiNftsCollectionsIngestRoute =
   ApiNftsCollectionsIngestRouteImport.update({
-    id: '/api/nfts/collections/ingest',
-    path: '/api/nfts/collections/ingest',
-    getParentRoute: () => rootRouteImport,
+    id: '/collections/ingest',
+    path: '/collections/ingest',
+    getParentRoute: () => ApiNftsRoute,
   } as any)
 const ApiNftsCollectionsAllowedRoute =
   ApiNftsCollectionsAllowedRouteImport.update({
-    id: '/api/nfts/collections/allowed',
-    path: '/api/nfts/collections/allowed',
-    getParentRoute: () => rootRouteImport,
+    id: '/collections/allowed',
+    path: '/collections/allowed',
+    getParentRoute: () => ApiNftsRoute,
+  } as any)
+const ApiNftsAssetMintMarketStateRoute =
+  ApiNftsAssetMintMarketStateRouteImport.update({
+    id: '/$assetMint/market-state',
+    path: '/$assetMint/market-state',
+    getParentRoute: () => ApiNftsRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/collections': typeof AppCollectionsRouteWithChildren
   '/dashboard': typeof AppDashboardRoute
+  '/nft-list': typeof AppNftListRoute
   '/sales': typeof AppSalesRoute
   '/verified-sales': typeof AppVerifiedSalesRoute
   '/api/market-sales': typeof ApiMarketSalesRoute
   '/api/markets': typeof ApiMarketsRoute
-  '/api/verified-sales': typeof ApiVerifiedSalesRoute
+  '/api/nft-list': typeof ApiNftListRoute
+  '/api/nfts': typeof ApiNftsRouteWithChildren
+  '/api/verified-sales': typeof ApiVerifiedSalesRouteWithChildren
   '/collections/$slug': typeof AppCollectionsSlugRoute
   '/api/nfts/refresh': typeof ApiNftsRefreshRoute
   '/api/nfts/status': typeof ApiNftsStatusRoute
@@ -211,13 +251,16 @@ export interface FileRoutesByFullPath {
   '/api/nfts/tracked': typeof ApiNftsTrackedRoute
   '/api/nfts/untrack': typeof ApiNftsUntrackRoute
   '/api/providers/status': typeof ApiProvidersStatusRoute
+  '/api/refresh/verified-sales': typeof ApiRefreshVerifiedSalesRoute
   '/api/rwa-market/enrich-sale': typeof ApiRwaMarketEnrichSaleRoute
   '/api/rwa-market/events': typeof ApiRwaMarketEventsRoute
   '/api/rwa-market/latest-sales': typeof ApiRwaMarketLatestSalesRoute
   '/api/rwa-market/listed': typeof ApiRwaMarketListedRoute
   '/api/rwa-market/stats': typeof ApiRwaMarketStatsRoute
   '/api/sales/latest': typeof ApiSalesLatestRoute
+  '/api/verified-sales/latest': typeof ApiVerifiedSalesLatestRoute
   '/api/index/pokemon': typeof ApiIndexPokemonRouteWithChildren
+  '/api/nfts/$assetMint/market-state': typeof ApiNftsAssetMintMarketStateRoute
   '/api/nfts/collections/allowed': typeof ApiNftsCollectionsAllowedRoute
   '/api/nfts/collections/ingest': typeof ApiNftsCollectionsIngestRoute
   '/api/nfts/collections/preview': typeof ApiNftsCollectionsPreviewRoute
@@ -230,11 +273,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/collections': typeof AppCollectionsRouteWithChildren
   '/dashboard': typeof AppDashboardRoute
+  '/nft-list': typeof AppNftListRoute
   '/sales': typeof AppSalesRoute
   '/verified-sales': typeof AppVerifiedSalesRoute
   '/api/market-sales': typeof ApiMarketSalesRoute
   '/api/markets': typeof ApiMarketsRoute
-  '/api/verified-sales': typeof ApiVerifiedSalesRoute
+  '/api/nft-list': typeof ApiNftListRoute
+  '/api/nfts': typeof ApiNftsRouteWithChildren
+  '/api/verified-sales': typeof ApiVerifiedSalesRouteWithChildren
   '/collections/$slug': typeof AppCollectionsSlugRoute
   '/api/nfts/refresh': typeof ApiNftsRefreshRoute
   '/api/nfts/status': typeof ApiNftsStatusRoute
@@ -242,13 +288,16 @@ export interface FileRoutesByTo {
   '/api/nfts/tracked': typeof ApiNftsTrackedRoute
   '/api/nfts/untrack': typeof ApiNftsUntrackRoute
   '/api/providers/status': typeof ApiProvidersStatusRoute
+  '/api/refresh/verified-sales': typeof ApiRefreshVerifiedSalesRoute
   '/api/rwa-market/enrich-sale': typeof ApiRwaMarketEnrichSaleRoute
   '/api/rwa-market/events': typeof ApiRwaMarketEventsRoute
   '/api/rwa-market/latest-sales': typeof ApiRwaMarketLatestSalesRoute
   '/api/rwa-market/listed': typeof ApiRwaMarketListedRoute
   '/api/rwa-market/stats': typeof ApiRwaMarketStatsRoute
   '/api/sales/latest': typeof ApiSalesLatestRoute
+  '/api/verified-sales/latest': typeof ApiVerifiedSalesLatestRoute
   '/api/index/pokemon': typeof ApiIndexPokemonRouteWithChildren
+  '/api/nfts/$assetMint/market-state': typeof ApiNftsAssetMintMarketStateRoute
   '/api/nfts/collections/allowed': typeof ApiNftsCollectionsAllowedRoute
   '/api/nfts/collections/ingest': typeof ApiNftsCollectionsIngestRoute
   '/api/nfts/collections/preview': typeof ApiNftsCollectionsPreviewRoute
@@ -263,11 +312,14 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/collections': typeof AppCollectionsRouteWithChildren
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/nft-list': typeof AppNftListRoute
   '/_app/sales': typeof AppSalesRoute
   '/_app/verified-sales': typeof AppVerifiedSalesRoute
   '/api/market-sales': typeof ApiMarketSalesRoute
   '/api/markets': typeof ApiMarketsRoute
-  '/api/verified-sales': typeof ApiVerifiedSalesRoute
+  '/api/nft-list': typeof ApiNftListRoute
+  '/api/nfts': typeof ApiNftsRouteWithChildren
+  '/api/verified-sales': typeof ApiVerifiedSalesRouteWithChildren
   '/_app/collections/$slug': typeof AppCollectionsSlugRoute
   '/api/nfts/refresh': typeof ApiNftsRefreshRoute
   '/api/nfts/status': typeof ApiNftsStatusRoute
@@ -275,13 +327,16 @@ export interface FileRoutesById {
   '/api/nfts/tracked': typeof ApiNftsTrackedRoute
   '/api/nfts/untrack': typeof ApiNftsUntrackRoute
   '/api/providers/status': typeof ApiProvidersStatusRoute
+  '/api/refresh/verified-sales': typeof ApiRefreshVerifiedSalesRoute
   '/api/rwa-market/enrich-sale': typeof ApiRwaMarketEnrichSaleRoute
   '/api/rwa-market/events': typeof ApiRwaMarketEventsRoute
   '/api/rwa-market/latest-sales': typeof ApiRwaMarketLatestSalesRoute
   '/api/rwa-market/listed': typeof ApiRwaMarketListedRoute
   '/api/rwa-market/stats': typeof ApiRwaMarketStatsRoute
   '/api/sales/latest': typeof ApiSalesLatestRoute
+  '/api/verified-sales/latest': typeof ApiVerifiedSalesLatestRoute
   '/api/index/pokemon': typeof ApiIndexPokemonRouteWithChildren
+  '/api/nfts/$assetMint/market-state': typeof ApiNftsAssetMintMarketStateRoute
   '/api/nfts/collections/allowed': typeof ApiNftsCollectionsAllowedRoute
   '/api/nfts/collections/ingest': typeof ApiNftsCollectionsIngestRoute
   '/api/nfts/collections/preview': typeof ApiNftsCollectionsPreviewRoute
@@ -296,10 +351,13 @@ export interface FileRouteTypes {
     | '/'
     | '/collections'
     | '/dashboard'
+    | '/nft-list'
     | '/sales'
     | '/verified-sales'
     | '/api/market-sales'
     | '/api/markets'
+    | '/api/nft-list'
+    | '/api/nfts'
     | '/api/verified-sales'
     | '/collections/$slug'
     | '/api/nfts/refresh'
@@ -308,13 +366,16 @@ export interface FileRouteTypes {
     | '/api/nfts/tracked'
     | '/api/nfts/untrack'
     | '/api/providers/status'
+    | '/api/refresh/verified-sales'
     | '/api/rwa-market/enrich-sale'
     | '/api/rwa-market/events'
     | '/api/rwa-market/latest-sales'
     | '/api/rwa-market/listed'
     | '/api/rwa-market/stats'
     | '/api/sales/latest'
+    | '/api/verified-sales/latest'
     | '/api/index/pokemon'
+    | '/api/nfts/$assetMint/market-state'
     | '/api/nfts/collections/allowed'
     | '/api/nfts/collections/ingest'
     | '/api/nfts/collections/preview'
@@ -327,10 +388,13 @@ export interface FileRouteTypes {
     | '/'
     | '/collections'
     | '/dashboard'
+    | '/nft-list'
     | '/sales'
     | '/verified-sales'
     | '/api/market-sales'
     | '/api/markets'
+    | '/api/nft-list'
+    | '/api/nfts'
     | '/api/verified-sales'
     | '/collections/$slug'
     | '/api/nfts/refresh'
@@ -339,13 +403,16 @@ export interface FileRouteTypes {
     | '/api/nfts/tracked'
     | '/api/nfts/untrack'
     | '/api/providers/status'
+    | '/api/refresh/verified-sales'
     | '/api/rwa-market/enrich-sale'
     | '/api/rwa-market/events'
     | '/api/rwa-market/latest-sales'
     | '/api/rwa-market/listed'
     | '/api/rwa-market/stats'
     | '/api/sales/latest'
+    | '/api/verified-sales/latest'
     | '/api/index/pokemon'
+    | '/api/nfts/$assetMint/market-state'
     | '/api/nfts/collections/allowed'
     | '/api/nfts/collections/ingest'
     | '/api/nfts/collections/preview'
@@ -359,10 +426,13 @@ export interface FileRouteTypes {
     | '/_app'
     | '/_app/collections'
     | '/_app/dashboard'
+    | '/_app/nft-list'
     | '/_app/sales'
     | '/_app/verified-sales'
     | '/api/market-sales'
     | '/api/markets'
+    | '/api/nft-list'
+    | '/api/nfts'
     | '/api/verified-sales'
     | '/_app/collections/$slug'
     | '/api/nfts/refresh'
@@ -371,13 +441,16 @@ export interface FileRouteTypes {
     | '/api/nfts/tracked'
     | '/api/nfts/untrack'
     | '/api/providers/status'
+    | '/api/refresh/verified-sales'
     | '/api/rwa-market/enrich-sale'
     | '/api/rwa-market/events'
     | '/api/rwa-market/latest-sales'
     | '/api/rwa-market/listed'
     | '/api/rwa-market/stats'
     | '/api/sales/latest'
+    | '/api/verified-sales/latest'
     | '/api/index/pokemon'
+    | '/api/nfts/$assetMint/market-state'
     | '/api/nfts/collections/allowed'
     | '/api/nfts/collections/ingest'
     | '/api/nfts/collections/preview'
@@ -392,13 +465,11 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   ApiMarketSalesRoute: typeof ApiMarketSalesRoute
   ApiMarketsRoute: typeof ApiMarketsRoute
-  ApiVerifiedSalesRoute: typeof ApiVerifiedSalesRoute
-  ApiNftsRefreshRoute: typeof ApiNftsRefreshRoute
-  ApiNftsStatusRoute: typeof ApiNftsStatusRoute
-  ApiNftsTrackRoute: typeof ApiNftsTrackRoute
-  ApiNftsTrackedRoute: typeof ApiNftsTrackedRoute
-  ApiNftsUntrackRoute: typeof ApiNftsUntrackRoute
+  ApiNftListRoute: typeof ApiNftListRoute
+  ApiNftsRoute: typeof ApiNftsRouteWithChildren
+  ApiVerifiedSalesRoute: typeof ApiVerifiedSalesRouteWithChildren
   ApiProvidersStatusRoute: typeof ApiProvidersStatusRoute
+  ApiRefreshVerifiedSalesRoute: typeof ApiRefreshVerifiedSalesRoute
   ApiRwaMarketEnrichSaleRoute: typeof ApiRwaMarketEnrichSaleRoute
   ApiRwaMarketEventsRoute: typeof ApiRwaMarketEventsRoute
   ApiRwaMarketLatestSalesRoute: typeof ApiRwaMarketLatestSalesRoute
@@ -406,9 +477,6 @@ export interface RootRouteChildren {
   ApiRwaMarketStatsRoute: typeof ApiRwaMarketStatsRoute
   ApiSalesLatestRoute: typeof ApiSalesLatestRoute
   ApiIndexPokemonRoute: typeof ApiIndexPokemonRouteWithChildren
-  ApiNftsCollectionsAllowedRoute: typeof ApiNftsCollectionsAllowedRoute
-  ApiNftsCollectionsIngestRoute: typeof ApiNftsCollectionsIngestRoute
-  ApiNftsCollectionsPreviewRoute: typeof ApiNftsCollectionsPreviewRoute
   ApiSalesMarketMarketRoute: typeof ApiSalesMarketMarketRoute
   ApiSalesProviderProviderRoute: typeof ApiSalesProviderProviderRoute
   ApiWebhooksHeliusNftEventsRoute: typeof ApiWebhooksHeliusNftEventsRoute
@@ -435,6 +503,20 @@ declare module '@tanstack/react-router' {
       path: '/api/verified-sales'
       fullPath: '/api/verified-sales'
       preLoaderRoute: typeof ApiVerifiedSalesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/nfts': {
+      id: '/api/nfts'
+      path: '/api/nfts'
+      fullPath: '/api/nfts'
+      preLoaderRoute: typeof ApiNftsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/nft-list': {
+      id: '/api/nft-list'
+      path: '/api/nft-list'
+      fullPath: '/api/nft-list'
+      preLoaderRoute: typeof ApiNftListRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/markets': {
@@ -465,6 +547,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSalesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/nft-list': {
+      id: '/_app/nft-list'
+      path: '/nft-list'
+      fullPath: '/nft-list'
+      preLoaderRoute: typeof AppNftListRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboard': {
       id: '/_app/dashboard'
       path: '/dashboard'
@@ -485,6 +574,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/index/pokemon'
       preLoaderRoute: typeof ApiIndexPokemonRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/verified-sales/latest': {
+      id: '/api/verified-sales/latest'
+      path: '/latest'
+      fullPath: '/api/verified-sales/latest'
+      preLoaderRoute: typeof ApiVerifiedSalesLatestRouteImport
+      parentRoute: typeof ApiVerifiedSalesRoute
     }
     '/api/sales/latest': {
       id: '/api/sales/latest'
@@ -528,6 +624,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRwaMarketEnrichSaleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/refresh/verified-sales': {
+      id: '/api/refresh/verified-sales'
+      path: '/api/refresh/verified-sales'
+      fullPath: '/api/refresh/verified-sales'
+      preLoaderRoute: typeof ApiRefreshVerifiedSalesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/providers/status': {
       id: '/api/providers/status'
       path: '/api/providers/status'
@@ -537,38 +640,38 @@ declare module '@tanstack/react-router' {
     }
     '/api/nfts/untrack': {
       id: '/api/nfts/untrack'
-      path: '/api/nfts/untrack'
+      path: '/untrack'
       fullPath: '/api/nfts/untrack'
       preLoaderRoute: typeof ApiNftsUntrackRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/api/nfts/tracked': {
       id: '/api/nfts/tracked'
-      path: '/api/nfts/tracked'
+      path: '/tracked'
       fullPath: '/api/nfts/tracked'
       preLoaderRoute: typeof ApiNftsTrackedRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/api/nfts/track': {
       id: '/api/nfts/track'
-      path: '/api/nfts/track'
+      path: '/track'
       fullPath: '/api/nfts/track'
       preLoaderRoute: typeof ApiNftsTrackRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/api/nfts/status': {
       id: '/api/nfts/status'
-      path: '/api/nfts/status'
+      path: '/status'
       fullPath: '/api/nfts/status'
       preLoaderRoute: typeof ApiNftsStatusRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/api/nfts/refresh': {
       id: '/api/nfts/refresh'
-      path: '/api/nfts/refresh'
+      path: '/refresh'
       fullPath: '/api/nfts/refresh'
       preLoaderRoute: typeof ApiNftsRefreshRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/_app/collections/$slug': {
       id: '/_app/collections/$slug'
@@ -607,24 +710,31 @@ declare module '@tanstack/react-router' {
     }
     '/api/nfts/collections/preview': {
       id: '/api/nfts/collections/preview'
-      path: '/api/nfts/collections/preview'
+      path: '/collections/preview'
       fullPath: '/api/nfts/collections/preview'
       preLoaderRoute: typeof ApiNftsCollectionsPreviewRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/api/nfts/collections/ingest': {
       id: '/api/nfts/collections/ingest'
-      path: '/api/nfts/collections/ingest'
+      path: '/collections/ingest'
       fullPath: '/api/nfts/collections/ingest'
       preLoaderRoute: typeof ApiNftsCollectionsIngestRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
     '/api/nfts/collections/allowed': {
       id: '/api/nfts/collections/allowed'
-      path: '/api/nfts/collections/allowed'
+      path: '/collections/allowed'
       fullPath: '/api/nfts/collections/allowed'
       preLoaderRoute: typeof ApiNftsCollectionsAllowedRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof ApiNftsRoute
+    }
+    '/api/nfts/$assetMint/market-state': {
+      id: '/api/nfts/$assetMint/market-state'
+      path: '/$assetMint/market-state'
+      fullPath: '/api/nfts/$assetMint/market-state'
+      preLoaderRoute: typeof ApiNftsAssetMintMarketStateRouteImport
+      parentRoute: typeof ApiNftsRoute
     }
   }
 }
@@ -644,6 +754,7 @@ const AppCollectionsRouteWithChildren = AppCollectionsRoute._addFileChildren(
 interface AppRouteChildren {
   AppCollectionsRoute: typeof AppCollectionsRouteWithChildren
   AppDashboardRoute: typeof AppDashboardRoute
+  AppNftListRoute: typeof AppNftListRoute
   AppSalesRoute: typeof AppSalesRoute
   AppVerifiedSalesRoute: typeof AppVerifiedSalesRoute
 }
@@ -651,11 +762,50 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppCollectionsRoute: AppCollectionsRouteWithChildren,
   AppDashboardRoute: AppDashboardRoute,
+  AppNftListRoute: AppNftListRoute,
   AppSalesRoute: AppSalesRoute,
   AppVerifiedSalesRoute: AppVerifiedSalesRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
+interface ApiNftsRouteChildren {
+  ApiNftsRefreshRoute: typeof ApiNftsRefreshRoute
+  ApiNftsStatusRoute: typeof ApiNftsStatusRoute
+  ApiNftsTrackRoute: typeof ApiNftsTrackRoute
+  ApiNftsTrackedRoute: typeof ApiNftsTrackedRoute
+  ApiNftsUntrackRoute: typeof ApiNftsUntrackRoute
+  ApiNftsAssetMintMarketStateRoute: typeof ApiNftsAssetMintMarketStateRoute
+  ApiNftsCollectionsAllowedRoute: typeof ApiNftsCollectionsAllowedRoute
+  ApiNftsCollectionsIngestRoute: typeof ApiNftsCollectionsIngestRoute
+  ApiNftsCollectionsPreviewRoute: typeof ApiNftsCollectionsPreviewRoute
+}
+
+const ApiNftsRouteChildren: ApiNftsRouteChildren = {
+  ApiNftsRefreshRoute: ApiNftsRefreshRoute,
+  ApiNftsStatusRoute: ApiNftsStatusRoute,
+  ApiNftsTrackRoute: ApiNftsTrackRoute,
+  ApiNftsTrackedRoute: ApiNftsTrackedRoute,
+  ApiNftsUntrackRoute: ApiNftsUntrackRoute,
+  ApiNftsAssetMintMarketStateRoute: ApiNftsAssetMintMarketStateRoute,
+  ApiNftsCollectionsAllowedRoute: ApiNftsCollectionsAllowedRoute,
+  ApiNftsCollectionsIngestRoute: ApiNftsCollectionsIngestRoute,
+  ApiNftsCollectionsPreviewRoute: ApiNftsCollectionsPreviewRoute,
+}
+
+const ApiNftsRouteWithChildren =
+  ApiNftsRoute._addFileChildren(ApiNftsRouteChildren)
+
+interface ApiVerifiedSalesRouteChildren {
+  ApiVerifiedSalesLatestRoute: typeof ApiVerifiedSalesLatestRoute
+}
+
+const ApiVerifiedSalesRouteChildren: ApiVerifiedSalesRouteChildren = {
+  ApiVerifiedSalesLatestRoute: ApiVerifiedSalesLatestRoute,
+}
+
+const ApiVerifiedSalesRouteWithChildren =
+  ApiVerifiedSalesRoute._addFileChildren(ApiVerifiedSalesRouteChildren)
 
 interface ApiIndexPokemonRouteChildren {
   ApiIndexPokemonHistoryRoute: typeof ApiIndexPokemonHistoryRoute
@@ -674,13 +824,11 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   ApiMarketSalesRoute: ApiMarketSalesRoute,
   ApiMarketsRoute: ApiMarketsRoute,
-  ApiVerifiedSalesRoute: ApiVerifiedSalesRoute,
-  ApiNftsRefreshRoute: ApiNftsRefreshRoute,
-  ApiNftsStatusRoute: ApiNftsStatusRoute,
-  ApiNftsTrackRoute: ApiNftsTrackRoute,
-  ApiNftsTrackedRoute: ApiNftsTrackedRoute,
-  ApiNftsUntrackRoute: ApiNftsUntrackRoute,
+  ApiNftListRoute: ApiNftListRoute,
+  ApiNftsRoute: ApiNftsRouteWithChildren,
+  ApiVerifiedSalesRoute: ApiVerifiedSalesRouteWithChildren,
   ApiProvidersStatusRoute: ApiProvidersStatusRoute,
+  ApiRefreshVerifiedSalesRoute: ApiRefreshVerifiedSalesRoute,
   ApiRwaMarketEnrichSaleRoute: ApiRwaMarketEnrichSaleRoute,
   ApiRwaMarketEventsRoute: ApiRwaMarketEventsRoute,
   ApiRwaMarketLatestSalesRoute: ApiRwaMarketLatestSalesRoute,
@@ -688,9 +836,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRwaMarketStatsRoute: ApiRwaMarketStatsRoute,
   ApiSalesLatestRoute: ApiSalesLatestRoute,
   ApiIndexPokemonRoute: ApiIndexPokemonRouteWithChildren,
-  ApiNftsCollectionsAllowedRoute: ApiNftsCollectionsAllowedRoute,
-  ApiNftsCollectionsIngestRoute: ApiNftsCollectionsIngestRoute,
-  ApiNftsCollectionsPreviewRoute: ApiNftsCollectionsPreviewRoute,
   ApiSalesMarketMarketRoute: ApiSalesMarketMarketRoute,
   ApiSalesProviderProviderRoute: ApiSalesProviderProviderRoute,
   ApiWebhooksHeliusNftEventsRoute: ApiWebhooksHeliusNftEventsRoute,

@@ -5,7 +5,15 @@ export const Route = createFileRoute("/api/providers/status")({
     handlers: {
       GET: async () => {
         const { getProviderStatusReport } = await import("@/lib/provider-ingestion/ingest");
-        return Response.json(await getProviderStatusReport(), { headers: { "Cache-Control": "no-store" } });
+        const { getMarketActivityProviderStatusReport } = await import("@/services/nftMarketActivityConnectors");
+        const salesProviders = await getProviderStatusReport();
+        return Response.json(
+          {
+            ...salesProviders,
+            ...getMarketActivityProviderStatusReport(),
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
       },
     },
   },

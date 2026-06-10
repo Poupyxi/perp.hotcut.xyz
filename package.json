@@ -29,7 +29,9 @@
     "enrich:sale-from-tx": "tsx scripts/enrich-sale-from-tx.ts",
     "enrich:payment-tokens": "tsx scripts/enrich-payment-tokens.ts",
     "calculate:price-growth": "tsx scripts/calculate-price-growth.ts",
-    "backfill:verified-sales": "tsx scripts/backfill-verified-sales.ts"
+    "backfill:verified-sales": "tsx scripts/backfill-verified-sales.ts",
+    "refresh:nft-market-states": "tsx scripts/refresh-nft-market-states.ts",
+    "refresh:verified-sales": "tsx scripts/refresh-nft-market-states.ts"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.25.5",

@@ -72,6 +72,17 @@ function runNftMigrations(database: DatabaseSync) {
       last_sale_marketplace TEXT,
       last_sale_tx_signature TEXT,
       floor_price_sol REAL,
+      current_status TEXT,
+      latest_market_price_sol REAL,
+      latest_market_price_usd REAL,
+      latest_purchase_price_sol REAL,
+      latest_purchase_price_usd REAL,
+      latest_marketplace TEXT,
+      latest_provider TEXT,
+      latest_tx_hash TEXT,
+      last_checked_at TEXT,
+      validation_status TEXT,
+      raw_market_state_json TEXT,
       market_updated_at TEXT,
       updated_at TEXT NOT NULL,
       created_at TEXT NOT NULL
@@ -143,6 +154,17 @@ function runNftMigrations(database: DatabaseSync) {
   addColumnIfMissing(database, "rwa_nft_events", "price_change_calculated_at", "TEXT");
   addColumnIfMissing(database, "nft_assets", "asset_type", "TEXT");
   addColumnIfMissing(database, "nft_assets", "public_group", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "current_status", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "latest_market_price_sol", "REAL");
+  addColumnIfMissing(database, "nft_assets", "latest_market_price_usd", "REAL");
+  addColumnIfMissing(database, "nft_assets", "latest_purchase_price_sol", "REAL");
+  addColumnIfMissing(database, "nft_assets", "latest_purchase_price_usd", "REAL");
+  addColumnIfMissing(database, "nft_assets", "latest_marketplace", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "latest_provider", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "latest_tx_hash", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "last_checked_at", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "validation_status", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "raw_market_state_json", "TEXT");
   addColumnIfMissing(database, "queue_state", "ingestion_running", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(database, "queue_state", "ingestion_current_collection", "TEXT");
   addColumnIfMissing(database, "queue_state", "ingestion_current_page", "INTEGER");
@@ -155,6 +177,9 @@ function runNftMigrations(database: DatabaseSync) {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_nft_assets_asset_type ON nft_assets(asset_type);
     CREATE INDEX IF NOT EXISTS idx_nft_assets_public_group ON nft_assets(public_group);
+    CREATE INDEX IF NOT EXISTS idx_nft_assets_current_status ON nft_assets(current_status);
+    CREATE INDEX IF NOT EXISTS idx_nft_assets_latest_provider ON nft_assets(latest_provider);
+    CREATE INDEX IF NOT EXISTS idx_nft_assets_last_checked_at ON nft_assets(last_checked_at);
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_payment_symbol ON rwa_nft_events(payment_symbol);
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_payment_mint ON rwa_nft_events(payment_mint);
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_price_change_direction ON rwa_nft_events(price_change_direction);

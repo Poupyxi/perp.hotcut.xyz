@@ -29,6 +29,19 @@ type VerifiedSale = {
   image: string | null;
   collection: string | null;
   owner: string | null;
+  currentStatus: string | null;
+  isListed: boolean;
+  latestListingPriceSol: number | null;
+  latestListingPriceUsd: number | null;
+  latestPurchasePriceSol: number | null;
+  latestPurchasePriceUsd: number | null;
+  latestMarketPriceSol: number | null;
+  latestMarketPriceUsd: number | null;
+  latestMarketplace: string | null;
+  latestProvider: string | null;
+  latestTxHash: string | null;
+  lastCheckedAt: string | null;
+  validationStatus: string | null;
 };
 
 const CATEGORY_OPTIONS = [
@@ -55,12 +68,26 @@ const SOURCE_OPTIONS = [
   ["fallback_verified", "Fallback verified"],
 ] as const;
 
+const STATUS_OPTIONS = [
+  ["all", "All statuses"],
+  ["unlisted", "Unlisted"],
+  ["listed", "Listed"],
+  ["sold", "Sold"],
+  ["recently_sold", "Recently sold"],
+  ["stale", "Stale"],
+  ["unknown", "Unknown"],
+] as const;
+
 function fmtSol(value: number | null) {
   return typeof value === "number" ? `${value.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL` : "--";
 }
 
 function fmtUsd(value: number | null) {
   return typeof value === "number" ? `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "No USD conversion";
+}
+
+function fmtOptionalUsd(value: number | null) {
+  return typeof value === "number" ? `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : null;
 }
 
 function short(value: string | null | undefined) {
@@ -70,7 +97,7 @@ function short(value: string | null | undefined) {
 
 function sourceLabel(source: string) {
   if (source === "helius_enhanced_tx" || source === "helius_webhook") return "Helius verified";
-  if (source === "magiceden") return "Magic Eden verified";
+  if (source === "magiceden" || source === "magic-eden") return "Magic Eden verified";
   if (source === "tensor") return "Tensor verified";
   if (source === "manual") return "Manual verified";
   if (source === "discord") return "Discord verified";
@@ -117,6 +144,34 @@ function collectionLabel(value: string | null | undefined) {
   if (value === "BSG6DyEihFFtfvxtL9mKYsvTwiZXB1rq5gARMTJC2xAM") return "Phygitals";
   if (value === "phygZDQZJZVHvJGYPGoKPYUtXw7mstSYtTtcuh8LJcC") return "Phygitals";
   return value.length > 18 ? short(value) : value;
+}
+
+function statusLabel(value: string | null | undefined) {
+  return STATUS_OPTIONS.find(([status]) => status === value)?.[1] ?? "Unknown";
+}
+
+function statusClass(value: string | null | undefined) {
+  if (value === "listed") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+  if (value === "sold" || value === "recently_sold") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (value === "stale") return "border-red-500/40 bg-red-500/10 text-red-300";
+  return "border-border bg-surface text-muted-foreground";
+}
+
+function marketStatePrice(sale: VerifiedSale) {
+  return fmtSol(sale.latestMarketPriceSol) !== "--"
+    ? fmtSol(sale.latestMarketPriceSol)
+    : fmtOptionalUsd(sale.latestMarketPriceUsd) ?? "Unknown";
+}
+
+function listingPrice(sale: VerifiedSale) {
+  return fmtSol(sale.latestListingPriceSol) !== "--"
+    ? fmtSol(sale.latestListingPriceSol)
+    : fmtOptionalUsd(sale.latestListingPriceUsd);
+}
+
+function txUrl(value: string | null | undefined) {
+  if (value?.startsWith("TEST_SIGNATURE")) return null;
+  return value ? `https://solscan.io/tx/${value}` : null;
 }
 
 function NftImage({ src, name }: { src: string | null; name: string | null }) {
@@ -194,6 +249,11 @@ export function VerifiedSalesPage() {
   const [category, setCategory] = useState("all");
   const [marketplace, setMarketplace] = useState("");
   const [source, setSource] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [provider, setProvider] = useState("all");
+  const [hasSale, setHasSale] = useState("true");
+  const [listedOnly, setListedOnly] = useState(false);
+  const [soldOnly, setSoldOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [minPriceSol, setMinPriceSol] = useState("");
   const [maxPriceSol, setMaxPriceSol] = useState("");
@@ -208,6 +268,11 @@ export function VerifiedSalesPage() {
     const params = new URLSearchParams({ page: String(page), limit: String(limit), sort, hideTestSales: String(hideTestSales) });
     if (category !== "all") params.set("category", category);
     if (source !== "all") params.set("source", source);
+    if (status !== "all") params.set("status", status);
+    if (provider !== "all") params.set("provider", provider);
+    if (hasSale !== "all") params.set("hasSale", hasSale);
+    if (listedOnly) params.set("listedOnly", "true");
+    if (soldOnly) params.set("soldOnly", "true");
     if (marketplace.trim()) params.set("marketplace", marketplace.trim());
     if (search.trim()) params.set("search", search.trim());
     if (minPriceSol.trim()) params.set("minPriceSol", minPriceSol.trim());
@@ -217,12 +282,12 @@ export function VerifiedSalesPage() {
     if (startDate) params.set("startDate", new Date(startDate).toISOString());
     if (endDate) params.set("endDate", new Date(`${endDate}T23:59:59`).toISOString());
     return params.toString();
-  }, [category, endDate, hideTestSales, limit, marketplace, maxPriceSol, maxPriceUsd, minPriceSol, minPriceUsd, page, search, sort, source, startDate]);
+  }, [category, endDate, hasSale, hideTestSales, limit, listedOnly, marketplace, maxPriceSol, maxPriceUsd, minPriceSol, minPriceUsd, page, provider, search, soldOnly, sort, source, startDate, status]);
 
   useEffect(() => {
     const controller = new AbortController();
-    async function load() {
-      setLoading(true);
+    async function load(showLoading = true) {
+      if (showLoading) setLoading(true);
       setError(null);
       try {
         const response = await fetch(`/api/verified-sales?${query}`, { signal: controller.signal, headers: { accept: "application/json" } });
@@ -234,11 +299,15 @@ export function VerifiedSalesPage() {
         if (err instanceof Error && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Unable to load verified sales");
       } finally {
-        setLoading(false);
+        if (showLoading) setLoading(false);
       }
     }
-    void load();
-    return () => controller.abort();
+    void load(true);
+    const refresh = window.setInterval(() => void load(false), 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(refresh);
+    };
   }, [query]);
 
   const solVolume = sales.reduce((sum, sale) => sum + (sale.priceSol ?? 0), 0);
@@ -250,7 +319,7 @@ export function VerifiedSalesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Verified Sales</h1>
-        <p className="text-sm text-muted-foreground mt-1">Confirmed sales from tracked RWA NFT collections.</p>
+        <p className="text-sm text-muted-foreground mt-1">Market-state layer for NFT List, anchored on confirmed sales and active listing context.</p>
       </div>
 
       <div className="grid sm:grid-cols-3 gap-4">
@@ -268,6 +337,33 @@ export function VerifiedSalesPage() {
           <select value={source} onChange={(event) => setSource(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
             {SOURCE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
+          <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+            {STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </div>
+        <div className="grid md:grid-cols-4 gap-3">
+          <select value={provider} onChange={(event) => setProvider(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+            <option value="all">All providers</option>
+            <option value="helius">Helius</option>
+            <option value="magiceden">Magic Eden</option>
+            <option value="tensor">Tensor</option>
+            <option value="manual">Manual</option>
+          </select>
+          <select value={hasSale} onChange={(event) => setHasSale(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+            <option value="true">Has verified sale</option>
+            <option value="all">All tracked NFTs</option>
+            <option value="false">No verified sale</option>
+          </select>
+          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
+            <span>Listed only</span>
+            <input type="checkbox" checked={listedOnly} onChange={(event) => setListedOnly(event.target.checked)} className="h-4 w-4 accent-primary" />
+          </label>
+          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
+            <span>Sold only</span>
+            <input type="checkbox" checked={soldOnly} onChange={(event) => setSoldOnly(event.target.checked)} className="h-4 w-4 accent-primary" />
+          </label>
+        </div>
+        <div className="grid md:grid-cols-4 gap-3">
           <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -308,22 +404,24 @@ export function VerifiedSalesPage() {
             <tr className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground border-b border-border">
               <th className="text-center font-medium px-5 py-3">Category</th>              
               <th className="text-left font-medium px-5 py-3">NFT</th>
-              <th className="text-right font-medium px-5 py-3">Price</th>
-              <th className="text-right font-medium px-5 py-3">USD</th>
+              <th className="text-center font-medium px-5 py-3">Status</th>
+              <th className="text-right font-medium px-5 py-3">Latest Verified Sale</th>
+              <th className="text-right font-medium px-5 py-3">Latest Market Price</th>
+              <th className="text-right font-medium px-5 py-3">Active Listing</th>
               <th className="text-center font-medium px-5 py-3">Growth</th>
-              <th className="text-center font-medium px-5 py-3">Market</th>
-              <th className="text-center font-medium px-5 py-3">TX</th>
-              <th className="text-center font-medium px-5 py-3">Owner</th>
-              <th className="text-right font-medium px-5 py-3">Sold</th>
+              <th className="text-center font-medium px-5 py-3">Provider</th>
+              <th className="text-center font-medium px-5 py-3">Buyer / Seller</th>
+              <th className="text-right font-medium px-5 py-3">Last Checked</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {loading ? (
-              <tr><td colSpan={9} className="px-5 py-8 text-sm text-muted-foreground">Loading verified sales...</td></tr>
+              <tr><td colSpan={10} className="px-5 py-8 text-sm text-muted-foreground">Loading verified sales...</td></tr>
             ) : sales.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-8 text-sm text-muted-foreground">No confirmed sale events yet. A sale appears here only after a tracked NFT receives a verified SALE event with a transaction signature.</td></tr>
+              <tr><td colSpan={10} className="px-5 py-8 text-sm text-muted-foreground">No confirmed sale events yet. A sale appears here only after a tracked NFT receives a verified SALE event with a transaction signature.</td></tr>
             ) : sales.map((sale) => {
               const growth = priceGrowth(sale);
+              const activeListing = listingPrice(sale);
               return (
                 <tr key={sale.id} className="hover:bg-surface-raised/40 transition">
                   <td className="w-[90px] px-5 py-3 text-center text-muted-foreground">
@@ -344,8 +442,29 @@ export function VerifiedSalesPage() {
                       </div>
                     </div>
                   </td>
-                    <td className="px-5 py-3 text-right font-mono font-semibold tabular-nums">{primaryPrice(sale)}</td>
-                    <td className="px-5 py-3 text-right font-mono tabular-nums text-muted-foreground">{secondaryPrice(sale)}</td>
+                  <td className="px-5 py-3 text-center">
+                    <span className={`rounded border px-2 py-1 text-xs ${statusClass(sale.currentStatus)}`}>
+                      {statusLabel(sale.currentStatus)}
+                    </span>
+                  </td>
+                    <td className="px-5 py-3 text-right font-mono font-semibold tabular-nums">
+                      <div>{primaryPrice(sale)}</div>
+                      <div className="text-[11px] font-normal text-muted-foreground">{secondaryPrice(sale)}</div>
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono tabular-nums">
+                      <div>{marketStatePrice(sale)}</div>
+                      <div className="text-[11px] font-normal text-muted-foreground">Sales first</div>
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono tabular-nums text-muted-foreground">
+                      {activeListing ? (
+                        <div>
+                          <div>{activeListing}</div>
+                          <div className="text-[11px]">Listing context</div>
+                        </div>
+                      ) : (
+                        "Not listed"
+                      )}
+                    </td>
                     <td className={`px-5 py-3 text-center font-mono tabular-nums ${growth.className}`}>
                     <div className="font-semibold">{growth.label}</div>
                     {growth.amount && <div className="text-[11px] opacity-80">{growth.amount}</div>}
@@ -364,11 +483,22 @@ export function VerifiedSalesPage() {
                           </span>
                         )}
                       </div>
+                    <div className="mt-1 text-center text-[10px] text-muted-foreground">{sourceLabel(sale.latestProvider ?? sale.source)}</div>
                   </td>               
                   <td className="px-5 py-3 text-center text-xs text-muted-foreground">
-                    <span className="font-mono">{sale.buyer ? sale.buyer.slice(0, 4) : "unknown"}</span>
+                    <div>Buyer: <span className="font-mono">{sale.buyer ? short(sale.buyer) : "unknown"}</span></div>
+                    <div>Seller: <span className="font-mono">{sale.seller ? short(sale.seller) : "unknown"}</span></div>
                   </td>
-                  <td className="px-5 py-3 text-right text-xs text-muted-foreground"><RelativeTime iso={sale.eventAt} /></td>
+                  <td className="px-5 py-3 text-right text-xs text-muted-foreground">
+                    {sale.lastCheckedAt ? <RelativeTime iso={sale.lastCheckedAt} /> : <RelativeTime iso={sale.eventAt} />}
+                    {txUrl(sale.latestTxHash ?? sale.txSignature) ? (
+                      <a className="block font-mono text-primary hover:underline" href={txUrl(sale.latestTxHash ?? sale.txSignature) ?? undefined} target="_blank" rel="noreferrer">
+                        {short(sale.latestTxHash ?? sale.txSignature)}
+                      </a>
+                    ) : (
+                      <div className="font-mono">{short(sale.latestTxHash ?? sale.txSignature)}</div>
+                    )}
+                  </td>
                 </tr>
               );
             })}

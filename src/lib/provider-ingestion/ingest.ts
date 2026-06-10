@@ -60,11 +60,11 @@ export async function getProviderStatusReport(): Promise<{ providers: ProviderSa
   const storedStatuses = await getProviderStatuses();
   const byProvider = new Map<string, ProviderSalesStatus>();
 
+  for (const status of storedStatuses) byProvider.set(status.providerId, status);
   for (const connector of createSalesConnectors()) {
     byProvider.set(connector.providerId, connector.getStatus());
   }
   byProvider.set("helius", new HeliusSalesValidator().getStatus());
-  for (const status of storedStatuses) byProvider.set(status.providerId, status);
 
   return { providers: Array.from(byProvider.values()) };
 }

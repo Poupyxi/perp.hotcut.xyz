@@ -16,6 +16,11 @@ export type MarketEventFilters = {
   endDate?: string | null;
   search?: string | null;
   hideTestSales?: boolean;
+  status?: string | null;
+  provider?: string | null;
+  hasSale?: boolean | null;
+  listedOnly?: boolean;
+  soldOnly?: boolean;
   page?: number;
   limit?: number;
   sort?: string | null;
@@ -102,10 +107,35 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         last_sale_at = ?,
         last_sale_marketplace = ?,
         last_sale_tx_signature = ?,
+        current_status = 'recently_sold',
+        latest_market_price_sol = ?,
+        latest_market_price_usd = ?,
+        latest_purchase_price_sol = ?,
+        latest_purchase_price_usd = ?,
+        latest_marketplace = ?,
+        latest_provider = ?,
+        latest_tx_hash = ?,
+        validation_status = 'verified',
         owner = COALESCE(?, owner),
         market_updated_at = ?
       WHERE mint = ?
-    `).run(event.priceSol, event.priceUsd, event.eventAt, event.marketplace, event.txSignature, event.owner, timestamp, event.mint);
+    `).run(
+      event.priceSol,
+      event.priceUsd,
+      event.eventAt,
+      event.marketplace,
+      event.txSignature,
+      event.priceSol,
+      event.priceUsd,
+      event.priceSol,
+      event.priceUsd,
+      event.marketplace,
+      event.source,
+      event.txSignature,
+      event.owner,
+      timestamp,
+      event.mint,
+    );
     return;
   }
 
@@ -117,9 +147,13 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         listed_price_usd = ?,
         listing_marketplace = ?,
         listing_updated_at = ?,
+        current_status = 'listed',
+        latest_market_price_sol = COALESCE(latest_market_price_sol, ?),
+        latest_market_price_usd = COALESCE(latest_market_price_usd, ?),
+        latest_marketplace = COALESCE(latest_marketplace, ?),
         market_updated_at = ?
       WHERE mint = ?
-    `).run(event.priceSol, event.priceUsd, event.marketplace, event.eventAt, timestamp, event.mint);
+    `).run(event.priceSol, event.priceUsd, event.marketplace, event.eventAt, event.priceSol, event.priceUsd, event.marketplace, timestamp, event.mint);
     return;
   }
 
@@ -130,6 +164,7 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         listed_price_sol = NULL,
         listed_price_usd = NULL,
         listing_marketplace = NULL,
+        current_status = CASE WHEN last_sale_tx_signature IS NOT NULL THEN current_status ELSE 'unlisted' END,
         market_updated_at = ?
       WHERE mint = ?
     `).run(timestamp, event.mint);
@@ -143,9 +178,13 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         listed_price_usd = ?,
         listing_marketplace = COALESCE(?, listing_marketplace),
         listing_updated_at = ?,
+        current_status = 'listed',
+        latest_market_price_sol = COALESCE(latest_market_price_sol, ?),
+        latest_market_price_usd = COALESCE(latest_market_price_usd, ?),
+        latest_marketplace = COALESCE(latest_marketplace, ?),
         market_updated_at = ?
       WHERE mint = ?
-    `).run(event.priceSol, event.priceUsd, event.marketplace, event.eventAt, timestamp, event.mint);
+    `).run(event.priceSol, event.priceUsd, event.marketplace, event.eventAt, event.priceSol, event.priceUsd, event.marketplace, timestamp, event.mint);
     return;
   }
 
@@ -312,6 +351,20 @@ export async function getVerifiedSales(filters: MarketEventFilters = {}): Promis
   if (filters.hideTestSales ?? true) {
     where.push("events.tx_signature NOT LIKE 'TEST_SIGNATURE%'");
   }
+  if (filters.status && filters.status !== "all") {
+    where.push("COALESCE(assets.current_status, 'unknown') = ?");
+    params.push(filters.status);
+  }
+  if (filters.provider && filters.provider !== "all") {
+    where.push("(events.source LIKE ? OR assets.latest_provider LIKE ? OR assets.latest_marketplace LIKE ?)");
+    const needle = `%${filters.provider}%`;
+    params.push(needle, needle, needle);
+  }
+  if (filters.hasSale === false) {
+    where.push("0 = 1");
+  }
+  if (filters.listedOnly) where.push("assets.is_listed = 1");
+  if (filters.soldOnly || filters.hasSale === true) where.push("assets.last_sale_tx_signature IS NOT NULL");
 
   const order = filters.sort === "oldest"
     ? "events.event_at ASC"
@@ -345,7 +398,12 @@ export async function getVerifiedSales(filters: MarketEventFilters = {}): Promis
       events.price_change_amount, events.price_change_percent, events.price_change_direction,
       events.tx_signature, events.buyer, events.seller, events.event_at, events.source, events.raw_payload_json,
       assets.name, assets.image, assets.collection, assets.owner,
-      assets.last_sale_price_sol, assets.last_sale_at, assets.last_sale_marketplace
+      assets.current_status, assets.is_listed, assets.listed_price_sol, assets.listed_price_usd,
+      assets.latest_purchase_price_sol, assets.latest_purchase_price_usd,
+      assets.latest_market_price_sol, assets.latest_market_price_usd,
+      assets.latest_marketplace, assets.latest_provider, assets.latest_tx_hash,
+      assets.last_checked_at, assets.validation_status,
+      assets.last_sale_price_sol, assets.last_sale_price_usd, assets.last_sale_at, assets.last_sale_marketplace
     FROM rwa_nft_events events
     JOIN nft_assets assets ON assets.mint = events.mint
     WHERE ${where.join(" AND ")}
@@ -384,7 +442,21 @@ export async function getVerifiedSales(filters: MarketEventFilters = {}): Promis
       image: asString(row.image),
       collection: asString(row.collection),
       owner: asString(row.owner),
+      currentStatus: asString(row.current_status) as VerifiedSale["currentStatus"],
+      isListed: Boolean(row.is_listed),
+      latestListingPriceSol: asNumber(row.listed_price_sol),
+      latestListingPriceUsd: asNumber(row.listed_price_usd),
+      latestPurchasePriceSol: asNumber(row.latest_purchase_price_sol) ?? asNumber(row.last_sale_price_sol),
+      latestPurchasePriceUsd: asNumber(row.latest_purchase_price_usd) ?? asNumber(row.last_sale_price_usd),
+      latestMarketPriceSol: asNumber(row.latest_market_price_sol) ?? asNumber(row.last_sale_price_sol) ?? asNumber(row.listed_price_sol),
+      latestMarketPriceUsd: asNumber(row.latest_market_price_usd) ?? asNumber(row.last_sale_price_usd) ?? asNumber(row.listed_price_usd),
+      latestMarketplace: asString(row.latest_marketplace) ?? asString(row.marketplace),
+      latestProvider: asString(row.latest_provider) ?? asString(row.source),
+      latestTxHash: asString(row.latest_tx_hash) ?? String(row.tx_signature),
+      lastCheckedAt: asString(row.last_checked_at),
+      validationStatus: asString(row.validation_status) as VerifiedSale["validationStatus"],
       lastSalePriceSol: asNumber(row.last_sale_price_sol),
+      lastSalePriceUsd: asNumber(row.last_sale_price_usd),
       lastSaleAt: asString(row.last_sale_at),
       lastSaleMarketplace: asString(row.last_sale_marketplace),
     })),

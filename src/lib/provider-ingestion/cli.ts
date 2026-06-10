@@ -1,4 +1,5 @@
 import { getProviderStatusReport, runProviderSalesIngestion } from "./ingest";
+import { getMarketActivityProviderStatusReport } from "../../services/nftMarketActivityConnectors";
 import type { ProviderId } from "./types";
 
 const PROVIDERS = new Set<ProviderId>(["magic-eden", "tensor", "phygitals", "collector-crypt"]);
@@ -21,7 +22,10 @@ async function main() {
   }
 
   if (command === "status") {
-    console.log(JSON.stringify(await getProviderStatusReport(), null, 2));
+    console.log(JSON.stringify({
+      ...(await getProviderStatusReport()),
+      ...getMarketActivityProviderStatusReport(),
+    }, null, 2));
     return;
   }
 

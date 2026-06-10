@@ -6,6 +6,9 @@ export class HeliusSalesValidator {
   private status: ProviderSalesStatus = nowStatus("helius", "needs_api_key", "HELIUS_API_KEY is not configured. Sales remain unverified.");
 
   getStatus() {
+    if (getIngestionEnv().HELIUS_API_KEY && this.status.status === "needs_api_key") {
+      return nowStatus("helius", "live", "HELIUS_API_KEY is configured. Transaction verification hook is ready.");
+    }
     return this.status;
   }
 

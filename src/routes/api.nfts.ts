@@ -20,34 +20,29 @@ function optionalBooleanNullable(value: string | null) {
   return null;
 }
 
-export const Route = createFileRoute("/api/verified-sales")({
+export const Route = createFileRoute("/api/nfts")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const { getVerifiedSales } = await import("@/services/rwaNftMarketEventService");
+        const { getNFTMarketStates } = await import("@/services/nftMarketStateService");
         const url = new URL(request.url);
-        const result = await getVerifiedSales({
-          category: url.searchParams.get("category"),
-          marketplace: url.searchParams.get("marketplace"),
-          source: url.searchParams.get("source"),
-          minPriceSol: optionalNumber(url.searchParams.get("minPriceSol")),
-          maxPriceSol: optionalNumber(url.searchParams.get("maxPriceSol")),
-          minPriceUsd: optionalNumber(url.searchParams.get("minPriceUsd")),
-          maxPriceUsd: optionalNumber(url.searchParams.get("maxPriceUsd")),
-          startDate: url.searchParams.get("startDate"),
-          endDate: url.searchParams.get("endDate"),
+        const result = await getNFTMarketStates({
+          page: optionalNumber(url.searchParams.get("page")) ?? 1,
+          limit: optionalNumber(url.searchParams.get("limit")) ?? 50,
           search: url.searchParams.get("search"),
-          hideTestSales: optionalBoolean(url.searchParams.get("hideTestSales"), true),
+          market: url.searchParams.get("market"),
+          category: url.searchParams.get("category"),
           status: url.searchParams.get("status"),
           provider: url.searchParams.get("provider"),
           hasSale: optionalBooleanNullable(url.searchParams.get("hasSale")),
           listedOnly: optionalBoolean(url.searchParams.get("listedOnly"), false),
           soldOnly: optionalBoolean(url.searchParams.get("soldOnly"), false),
-          page: optionalNumber(url.searchParams.get("page")) ?? 1,
-          limit: optionalNumber(url.searchParams.get("limit")) ?? 50,
+          includeOther: optionalBoolean(url.searchParams.get("includeOther"), false),
+          includeUnknown: optionalBoolean(url.searchParams.get("includeUnknown"), false),
+          includeStaging: optionalBoolean(url.searchParams.get("includeStaging"), false),
           sort: url.searchParams.get("sort"),
-          includeStaging: url.searchParams.get("includeStaging") === "true",
         });
+
         return Response.json(result, { headers: { "Cache-Control": "no-store" } });
       },
     },
