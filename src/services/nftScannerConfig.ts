@@ -9,6 +9,9 @@ export type NftScannerConfig = {
   newMintDiscoveryEnabled: boolean;
   newMintDiscoveryIntervalSeconds: number;
   newMintDiscoveryLimitPerCollection: number;
+  nftListEnrichBatchSize: number;
+  nftListEnrichMaxRetries: number;
+  nftListEnrichDryRun: boolean;
   trackedCollections: string[];
   magicEdenCollectionSymbols: string[];
   tensorCollectionSlugs: string[];
@@ -51,6 +54,9 @@ export function isNftScannerDryRun(requestedDryRun?: boolean | null) {
 }
 
 export function readNftScannerConfig(input: { dryRun?: boolean | null } = {}): NftScannerConfig {
+  const nftListDryRun = env().NFT_LIST_ENRICH_DRY_RUN
+    ? env().NFT_LIST_ENRICH_DRY_RUN !== "false"
+    : isNftScannerDryRun(input.dryRun);
   return {
     dryRun: isNftScannerDryRun(input.dryRun),
     enabled: boolEnv("ENABLE_NFT_SCANNER", true),
@@ -60,6 +66,9 @@ export function readNftScannerConfig(input: { dryRun?: boolean | null } = {}): N
     newMintDiscoveryEnabled: boolEnv("ENABLE_NEW_MINT_DISCOVERY", true),
     newMintDiscoveryIntervalSeconds: numberEnv("NEW_MINT_DISCOVERY_INTERVAL_SECONDS", 1800),
     newMintDiscoveryLimitPerCollection: numberEnv("NEW_MINT_DISCOVERY_LIMIT_PER_COLLECTION", 500),
+    nftListEnrichBatchSize: numberEnv("NFT_LIST_ENRICH_BATCH_SIZE", 50),
+    nftListEnrichMaxRetries: numberEnv("NFT_LIST_ENRICH_MAX_RETRIES", 3),
+    nftListEnrichDryRun: input.dryRun === true ? true : input.dryRun === false ? nftListDryRun : nftListDryRun,
     trackedCollections: csvEnv("TRACKED_COLLECTIONS", ["pokemon-cards", "one-piece-cards", "nba-cards", "nfl-cards", "nhl-cards"]),
     magicEdenCollectionSymbols: csvEnv("MAGIC_EDEN_COLLECTION_SYMBOLS"),
     tensorCollectionSlugs: csvEnv("TENSOR_COLLECTION_SLUGS"),

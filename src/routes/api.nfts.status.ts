@@ -54,6 +54,9 @@ export const Route = createFileRoute("/api/nfts/status")({
             newMintDiscoveryEnabled: scannerConfig.newMintDiscoveryEnabled,
             newMintDiscoveryIntervalSeconds: scannerConfig.newMintDiscoveryIntervalSeconds,
             newMintDiscoveryLimitPerCollection: scannerConfig.newMintDiscoveryLimitPerCollection,
+            nftListEnrichDryRun: scannerConfig.nftListEnrichDryRun,
+            nftListEnrichBatchSize: scannerConfig.nftListEnrichBatchSize,
+            nftListEnrichMaxRetries: scannerConfig.nftListEnrichMaxRetries,
             scanStatuses: getProviderScanStatuses(),
           },
           database: {

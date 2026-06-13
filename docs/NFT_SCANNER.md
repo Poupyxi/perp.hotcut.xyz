@@ -63,6 +63,13 @@ Discover new mints from allowlisted collections:
 npm run discover:new-mints
 ```
 
+Enrich NFT List metadata, owner, last activity, and current state:
+
+```bash
+npm run enrich:nft-list:dry-run
+npm run enrich:nft-list
+```
+
 Scan market state for NFTs already in NFT List:
 
 ```bash
@@ -91,6 +98,10 @@ NFT_SCANNER_BATCH_SIZE=25
 NFT_SCANNER_INTERVAL_SECONDS=600
 NFT_SCANNER_MAX_RETRIES=3
 
+NFT_LIST_ENRICH_BATCH_SIZE=50
+NFT_LIST_ENRICH_MAX_RETRIES=3
+NFT_LIST_ENRICH_DRY_RUN=true
+
 ENABLE_NEW_MINT_DISCOVERY=true
 NEW_MINT_DISCOVERY_INTERVAL_SECONDS=1800
 NEW_MINT_DISCOVERY_LIMIT_PER_COLLECTION=500
@@ -110,11 +121,13 @@ Provider credentials and endpoints are read from environment variables. Secrets 
 Protected endpoints require `REFRESH_SECRET` via `x-refresh-secret` or `Authorization: Bearer <secret>`.
 
 ```text
+POST /api/nfts/enrich
 POST /api/scan/nft-market-states
 POST /api/discover/new-mints
 POST /api/refresh/nft-data
 GET  /api/providers/status
 GET  /api/nfts
+GET  /api/nfts/:assetMint
 GET  /api/nfts/:assetMint/market-state
 GET  /api/verified-sales
 GET  /api/verified-sales/latest

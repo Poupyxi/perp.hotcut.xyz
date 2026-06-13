@@ -15,14 +15,26 @@ export type RwaNftMarketEventSource =
   | "manual";
 
 export type NFTMarketStatus =
+  | "owned"
   | "unlisted"
   | "listed"
   | "sold"
+  | "transferred_out"
   | "recently_sold"
   | "stale"
   | "unknown";
 
 export type NFTMarketValidationStatus = "unverified" | "verified" | "failed";
+export type NFTMetadataStatus = "complete" | "partial" | "missing" | "error";
+export type NFTLastActivityType =
+  | "minted"
+  | "listed"
+  | "delisted"
+  | "bought"
+  | "sold"
+  | "transferred"
+  | "pack_opened"
+  | "unknown";
 
 export type NFTMarketActivityType = "listed" | "sold" | "delisted" | "transfer" | "minted" | "unknown";
 
@@ -83,6 +95,12 @@ export type NFTAsset = {
   lastListedAt: string | null;
   lastSoldAt: string | null;
   lastCheckedAt: string | null;
+  currentState?: NFTMarketStatus;
+  lastActivityType?: NFTLastActivityType;
+  lastActivityAt?: string | null;
+  lastActivityTxHash?: string | null;
+  lastActivityProvider?: string | null;
+  metadataStatus?: NFTMetadataStatus;
   createdAt: string;
   updatedAt: string;
 };
@@ -128,6 +146,10 @@ export type ProviderScanStatus = {
   itemsFound: number;
   itemsStored: number;
   durationMs: number;
+  metadataUpdated?: number;
+  imagesUpdated?: number;
+  ownersUpdated?: number;
+  lastActivitiesUpdated?: number;
 };
 
 export type NFTMarketState = {
@@ -136,10 +158,16 @@ export type NFTMarketState = {
   assetName: string | null;
   market: string | null;
   collectionSlug: string | null;
+  collectionName?: string | null;
   imageUrl: string | null;
   currentStatus: NFTMarketStatus;
+  currentState?: NFTMarketStatus;
   isListed: boolean;
   isSold: boolean;
+  lastActivityType?: NFTLastActivityType;
+  lastActivityAt?: string | null;
+  lastActivityTxHash?: string | null;
+  lastActivityProvider?: string | null;
   latestListingPriceSol: number | null;
   latestListingPriceUsd: number | null;
   latestSalePriceSol: number | null;
@@ -156,6 +184,7 @@ export type NFTMarketState = {
   lastListedAt: string | null;
   lastSoldAt: string | null;
   lastCheckedAt: string | null;
+  metadataStatus?: NFTMetadataStatus;
   validationStatus: NFTMarketValidationStatus;
   rawPayload: unknown;
   rawProviderPayloads?: unknown[];

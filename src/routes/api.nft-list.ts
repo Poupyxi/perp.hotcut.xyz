@@ -86,7 +86,7 @@ export const Route = createFileRoute("/api/nft-list")({
         }
 
         if (status && status !== "all") {
-          where.push("COALESCE(current_status, 'unknown') = ?");
+          where.push("COALESCE(current_state, current_status, 'unknown') = ?");
           params.push(status);
         }
 
@@ -149,7 +149,9 @@ export const Route = createFileRoute("/api/nft-list")({
             image,
             owner,
             collection,
+            collection_name,
             source_collection,
+            source_provider,
             category,
             asset_type,
             public_group,
@@ -159,7 +161,12 @@ export const Route = createFileRoute("/api/nft-list")({
             listed_price_usd,
             listing_marketplace,
             listing_updated_at,
+            current_state,
             current_status,
+            last_activity_type,
+            last_activity_at,
+            last_activity_tx_hash,
+            last_activity_provider,
             latest_market_price_sol,
             latest_market_price_usd,
             latest_purchase_price_sol,
@@ -168,6 +175,7 @@ export const Route = createFileRoute("/api/nft-list")({
             latest_provider,
             latest_tx_hash,
             last_checked_at,
+            metadata_status,
             validation_status,
             updated_at,
             last_sale_price_sol,
@@ -186,7 +194,9 @@ export const Route = createFileRoute("/api/nft-list")({
           image: typeof row.image === "string" ? row.image : null,
           owner: typeof row.owner === "string" ? row.owner : null,
           collection: typeof row.collection === "string" ? row.collection : null,
+          collectionName: typeof row.collection_name === "string" ? row.collection_name : null,
           sourceCollection: typeof row.source_collection === "string" ? row.source_collection : null,
+          sourceProvider: typeof row.source_provider === "string" ? row.source_provider : null,
           category: typeof row.category === "string" ? row.category : "unknown",
           assetType: typeof row.asset_type === "string" ? row.asset_type : "unknown",
           publicGroup: typeof row.public_group === "string" ? row.public_group : "other",
@@ -196,7 +206,12 @@ export const Route = createFileRoute("/api/nft-list")({
           latestListingPriceUsd: typeof row.listed_price_usd === "number" ? row.listed_price_usd : null,
           listingMarketplace: typeof row.listing_marketplace === "string" ? row.listing_marketplace : null,
           lastListedAt: typeof row.listing_updated_at === "string" ? row.listing_updated_at : null,
-          currentStatus: typeof row.current_status === "string" ? row.current_status : "unknown",
+          currentState: typeof row.current_state === "string" ? row.current_state : typeof row.current_status === "string" ? row.current_status : "unknown",
+          currentStatus: typeof row.current_state === "string" ? row.current_state : typeof row.current_status === "string" ? row.current_status : "unknown",
+          lastActivityType: typeof row.last_activity_type === "string" ? row.last_activity_type : "unknown",
+          lastActivityAt: typeof row.last_activity_at === "string" ? row.last_activity_at : null,
+          lastActivityTxHash: typeof row.last_activity_tx_hash === "string" ? row.last_activity_tx_hash : null,
+          lastActivityProvider: typeof row.last_activity_provider === "string" ? row.last_activity_provider : null,
           latestMarketPriceSol: typeof row.latest_market_price_sol === "number" ? row.latest_market_price_sol : null,
           latestMarketPriceUsd: typeof row.latest_market_price_usd === "number" ? row.latest_market_price_usd : null,
           latestPurchasePriceSol: typeof row.latest_purchase_price_sol === "number" ? row.latest_purchase_price_sol : null,
@@ -205,6 +220,7 @@ export const Route = createFileRoute("/api/nft-list")({
           latestProvider: typeof row.latest_provider === "string" ? row.latest_provider : null,
           latestTxHash: typeof row.latest_tx_hash === "string" ? row.latest_tx_hash : null,
           lastCheckedAt: typeof row.last_checked_at === "string" ? row.last_checked_at : null,
+          metadataStatus: typeof row.metadata_status === "string" ? row.metadata_status : "missing",
           validationStatus: typeof row.validation_status === "string" ? row.validation_status : "unverified",
           updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
           lastSalePriceSol: typeof row.last_sale_price_sol === "number" ? row.last_sale_price_sol : null,

@@ -32,6 +32,8 @@
     "backfill:verified-sales": "tsx scripts/backfill-verified-sales.ts",
     "refresh:nft-market-states": "tsx scripts/scan-nft-market-states.ts",
     "scan:nft-market-states": "tsx scripts/scan-nft-market-states.ts",
+    "enrich:nft-list": "tsx scripts/enrich-nft-list.ts",
+    "enrich:nft-list:dry-run": "tsx scripts/enrich-nft-list.ts --dry-run",
     "discover:new-mints": "tsx scripts/discover-new-mints.ts",
     "refresh:nft-data": "tsx scripts/refresh-nft-data.ts",
     "refresh:verified-sales": "tsx scripts/scan-nft-market-states.ts"

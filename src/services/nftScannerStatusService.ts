@@ -23,6 +23,10 @@ function rowToStatus(row: Record<string, unknown>): ProviderScanStatus {
     itemsFound: Number(row.items_found ?? 0),
     itemsStored: Number(row.items_stored ?? 0),
     durationMs: Number(row.duration_ms ?? 0),
+    metadataUpdated: Number(row.metadata_updated ?? 0),
+    imagesUpdated: Number(row.images_updated ?? 0),
+    ownersUpdated: Number(row.owners_updated ?? 0),
+    lastActivitiesUpdated: Number(row.last_activities_updated ?? 0),
   };
 }
 
@@ -40,8 +44,10 @@ export function saveProviderScanStatus(status: ProviderScanStatusInput, options:
   getNftDb().prepare(`
     INSERT INTO provider_scan_status (
       provider, scan_type, status, last_run_at, last_success_at, last_error,
-      items_checked, items_found, items_stored, duration_ms, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      items_checked, items_found, items_stored, duration_ms,
+      metadata_updated, images_updated, owners_updated, last_activities_updated,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider, scan_type) DO UPDATE SET
       status = excluded.status,
       last_run_at = excluded.last_run_at,
@@ -51,6 +57,10 @@ export function saveProviderScanStatus(status: ProviderScanStatusInput, options:
       items_found = excluded.items_found,
       items_stored = excluded.items_stored,
       duration_ms = excluded.duration_ms,
+      metadata_updated = excluded.metadata_updated,
+      images_updated = excluded.images_updated,
+      owners_updated = excluded.owners_updated,
+      last_activities_updated = excluded.last_activities_updated,
       updated_at = excluded.updated_at
   `).run(
     status.provider,
@@ -63,6 +73,10 @@ export function saveProviderScanStatus(status: ProviderScanStatusInput, options:
     status.itemsFound,
     status.itemsStored,
     status.durationMs,
+    status.metadataUpdated ?? 0,
+    status.imagesUpdated ?? 0,
+    status.ownersUpdated ?? 0,
+    status.lastActivitiesUpdated ?? 0,
     timestamp,
   );
 }

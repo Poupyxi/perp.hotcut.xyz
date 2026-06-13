@@ -1,4 +1,4 @@
-import type { NFTMarketState, NFTMarketStatus, NFTMarketValidationStatus } from "@/types/rwaNftMarket";
+import type { NFTLastActivityType, NFTMarketState, NFTMarketStatus, NFTMarketValidationStatus, NFTMetadataStatus } from "@/types/rwaNftMarket";
 import { ALLOWED_RWA_NFT_CATEGORIES } from "./nftCategoryService";
 import { getNftDb, parseJson, stringifyJson } from "./nftSqliteDb";
 import { getMarketActivityProviderStatusReport } from "./nftMarketActivityConnectors";
@@ -100,7 +100,7 @@ function deriveStatus(asset: SqlRow, latestSale: SqlRow | null): NFTMarketStatus
 }
 
 function stateFromRows(asset: SqlRow, latestSale: SqlRow | null): NFTMarketState {
-  const currentStatus = (asString(asset.current_status) as NFTMarketStatus | null) ?? deriveStatus(asset, latestSale);
+  const currentStatus = (asString(asset.current_state) as NFTMarketStatus | null) ?? (asString(asset.current_status) as NFTMarketStatus | null) ?? deriveStatus(asset, latestSale);
   const lastSalePriceSol = asNumber(latestSale?.price_sol) ?? asNumber(asset.last_sale_price_sol);
   const lastSalePriceUsd = asNumber(latestSale?.price_usd) ?? asNumber(asset.last_sale_price_usd);
   const listingPriceSol = asNumber(asset.listed_price_sol);
@@ -119,10 +119,16 @@ function stateFromRows(asset: SqlRow, latestSale: SqlRow | null): NFTMarketState
     assetName: asString(asset.name),
     market: asString(asset.category) ?? asString(asset.market),
     collectionSlug: asString(asset.source_collection) ?? asString(asset.collection),
+    collectionName: asString(asset.collection_name) ?? asString(asset.collection),
     imageUrl: asString(asset.image),
     currentStatus,
+    currentState: currentStatus,
     isListed: asBool(asset.is_listed),
     isSold: Boolean(lastSalePriceSol !== null || lastSalePriceUsd !== null || latestTxHash),
+    lastActivityType: (asString(asset.last_activity_type) as NFTLastActivityType | null) ?? "unknown",
+    lastActivityAt: asString(asset.last_activity_at),
+    lastActivityTxHash: asString(asset.last_activity_tx_hash),
+    lastActivityProvider: asString(asset.last_activity_provider),
     latestListingPriceSol: listingPriceSol,
     latestListingPriceUsd: listingPriceUsd,
     latestSalePriceSol: lastSalePriceSol,
@@ -139,6 +145,7 @@ function stateFromRows(asset: SqlRow, latestSale: SqlRow | null): NFTMarketState
     lastListedAt: asString(asset.listing_updated_at),
     lastSoldAt: asString(latestSale?.event_at) ?? asString(asset.last_sale_at),
     lastCheckedAt: asString(asset.last_checked_at),
+    metadataStatus: (asString(asset.metadata_status) as NFTMetadataStatus | null) ?? "missing",
     validationStatus: ((asString(asset.validation_status) as NFTMarketValidationStatus | null) ?? (latestTxHash ? "verified" : "unverified")),
     rawPayload: parseJson(asset.raw_market_state_json, null),
   };
@@ -290,7 +297,7 @@ export async function getNFTMarketStates(filters: NFTMarketStateFilters = {}) {
     params.push(category);
   }
   if (filters.status && filters.status !== "all") {
-    where.push("COALESCE(current_status, 'unknown') = ?");
+    where.push("COALESCE(current_state, current_status, 'unknown') = ?");
     params.push(filters.status);
   }
   if (filters.provider && filters.provider !== "all") {
