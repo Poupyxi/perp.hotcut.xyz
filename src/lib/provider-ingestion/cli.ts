@@ -1,5 +1,8 @@
 import { getProviderStatusReport, runProviderSalesIngestion } from "./ingest";
 import { getMarketActivityProviderStatusReport } from "../../services/nftMarketActivityConnectors";
+import { getMintDiscoveryProviderStatusReport } from "../../services/nftMintDiscoveryConnectors";
+import { providerApiEnv, readNftScannerConfig } from "../../services/nftScannerConfig";
+import { getProviderScanStatuses } from "../../services/nftScannerStatusService";
 import type { ProviderId } from "./types";
 
 const PROVIDERS = new Set<ProviderId>(["magic-eden", "tensor", "phygitals", "collector-crypt"]);
@@ -22,9 +25,23 @@ async function main() {
   }
 
   if (command === "status") {
+    const scannerConfig = readNftScannerConfig();
     console.log(JSON.stringify({
       ...(await getProviderStatusReport()),
       ...getMarketActivityProviderStatusReport(),
+      ...getMintDiscoveryProviderStatusReport(),
+      scanner: {
+        dryRun: scannerConfig.dryRun,
+        enabled: scannerConfig.enabled,
+        batchSize: scannerConfig.batchSize,
+        intervalSeconds: scannerConfig.intervalSeconds,
+        maxRetries: scannerConfig.maxRetries,
+        newMintDiscoveryEnabled: scannerConfig.newMintDiscoveryEnabled,
+        newMintDiscoveryLimitPerCollection: scannerConfig.newMintDiscoveryLimitPerCollection,
+        trackedCollections: scannerConfig.trackedCollections,
+        providerConfig: providerApiEnv(),
+        scanStatuses: getProviderScanStatuses(),
+      },
     }, null, 2));
     return;
   }

@@ -13,28 +13,27 @@ function numberArg(name: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function main() {
-  const mint = argValue("mint");
-  const limit = numberArg("limit");
-  console.log("[RWA MARKET] Starting NFT market-state refresh");
+function booleanArg(name: string) {
+  const raw = argValue(name);
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return null;
+}
 
-  const dryRunArg = argValue("dryRun");
+async function main() {
   const result = await scanAllNFTMarketStates({
-    mint,
-    limit,
-    dryRun: dryRunArg === "true" ? true : dryRunArg === "false" ? false : null,
+    mint: argValue("mint"),
+    limit: numberArg("limit"),
+    all: booleanArg("all") ?? false,
+    dryRun: booleanArg("dryRun"),
   });
 
-  console.log("[RWA MARKET] NFT market-state refresh completed");
   console.log(JSON.stringify(result, null, 2));
-
-  if (result.errors.length) {
-    process.exitCode = 1;
-  }
+  if (result.errors.length) process.exitCode = 1;
 }
 
 main().catch((error) => {
-  console.error("[RWA MARKET] NFT market-state refresh failed");
+  console.error("[NFT SCANNER] Market-state scan failed");
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });

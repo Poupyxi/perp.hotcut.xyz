@@ -134,6 +134,44 @@ function runNftMigrations(database: DatabaseSync) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_rwa_events_fallback_unique
       ON rwa_nft_events(mint, event_type, event_at, COALESCE(price_sol, -1), COALESCE(marketplace, ''))
       WHERE tx_signature IS NULL;
+
+    CREATE TABLE IF NOT EXISTS nft_listing_states (
+      id TEXT PRIMARY KEY,
+      asset_mint TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      marketplace TEXT,
+      listing_id TEXT,
+      seller_wallet TEXT,
+      price_sol REAL,
+      price_usd REAL,
+      currency TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      listed_at TEXT,
+      last_seen_at TEXT,
+      raw_payload_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_nft_listing_provider_asset_listing
+      ON nft_listing_states(provider, asset_mint, listing_id);
+    CREATE INDEX IF NOT EXISTS idx_nft_listing_asset_mint ON nft_listing_states(asset_mint);
+    CREATE INDEX IF NOT EXISTS idx_nft_listing_is_active ON nft_listing_states(is_active);
+
+    CREATE TABLE IF NOT EXISTS provider_scan_status (
+      provider TEXT NOT NULL,
+      scan_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_run_at TEXT,
+      last_success_at TEXT,
+      last_error TEXT,
+      items_checked INTEGER NOT NULL DEFAULT 0,
+      items_found INTEGER NOT NULL DEFAULT 0,
+      items_stored INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (provider, scan_type)
+    );
   `);
 
   database.prepare(`
@@ -165,6 +203,11 @@ function runNftMigrations(database: DatabaseSync) {
   addColumnIfMissing(database, "nft_assets", "last_checked_at", "TEXT");
   addColumnIfMissing(database, "nft_assets", "validation_status", "TEXT");
   addColumnIfMissing(database, "nft_assets", "raw_market_state_json", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "metadata_uri", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "collection_name", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "source_provider", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "discovered_at", "TEXT");
+  addColumnIfMissing(database, "nft_assets", "last_seen_at", "TEXT");
   addColumnIfMissing(database, "queue_state", "ingestion_running", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(database, "queue_state", "ingestion_current_collection", "TEXT");
   addColumnIfMissing(database, "queue_state", "ingestion_current_page", "INTEGER");
@@ -180,9 +223,14 @@ function runNftMigrations(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_nft_assets_current_status ON nft_assets(current_status);
     CREATE INDEX IF NOT EXISTS idx_nft_assets_latest_provider ON nft_assets(latest_provider);
     CREATE INDEX IF NOT EXISTS idx_nft_assets_last_checked_at ON nft_assets(last_checked_at);
+    CREATE INDEX IF NOT EXISTS idx_nft_assets_source_provider ON nft_assets(source_provider);
+    CREATE INDEX IF NOT EXISTS idx_nft_assets_discovered_at ON nft_assets(discovered_at);
+    CREATE INDEX IF NOT EXISTS idx_nft_assets_last_seen_at ON nft_assets(last_seen_at);
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_payment_symbol ON rwa_nft_events(payment_symbol);
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_payment_mint ON rwa_nft_events(payment_mint);
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_price_change_direction ON rwa_nft_events(price_change_direction);
+    CREATE INDEX IF NOT EXISTS idx_provider_scan_status_type ON provider_scan_status(scan_type);
+    CREATE INDEX IF NOT EXISTS idx_provider_scan_status_status ON provider_scan_status(status);
   `);
 }
 

@@ -29,8 +29,11 @@ import { Route as ApiRwaMarketListedRouteImport } from './routes/api.rwa-market.
 import { Route as ApiRwaMarketLatestSalesRouteImport } from './routes/api.rwa-market.latest-sales'
 import { Route as ApiRwaMarketEventsRouteImport } from './routes/api.rwa-market.events'
 import { Route as ApiRwaMarketEnrichSaleRouteImport } from './routes/api.rwa-market.enrich-sale'
+import { Route as ApiScanNftMarketStatesRouteImport } from './routes/api.scan.nft-market-states'
+import { Route as ApiRefreshNftDataRouteImport } from './routes/api.refresh.nft-data'
 import { Route as ApiRefreshVerifiedSalesRouteImport } from './routes/api.refresh.verified-sales'
 import { Route as ApiProvidersStatusRouteImport } from './routes/api.providers.status'
+import { Route as ApiDiscoverNewMintsRouteImport } from './routes/api.discover.new-mints'
 import { Route as ApiNftsUntrackRouteImport } from './routes/api.nfts.untrack'
 import { Route as ApiNftsTrackedRouteImport } from './routes/api.nfts.tracked'
 import { Route as ApiNftsTrackRouteImport } from './routes/api.nfts.track'
@@ -145,6 +148,17 @@ const ApiRwaMarketEnrichSaleRoute = ApiRwaMarketEnrichSaleRouteImport.update({
   path: '/api/rwa-market/enrich-sale',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiScanNftMarketStatesRoute =
+  ApiScanNftMarketStatesRouteImport.update({
+    id: '/api/scan/nft-market-states',
+    path: '/api/scan/nft-market-states',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiRefreshNftDataRoute = ApiRefreshNftDataRouteImport.update({
+  id: '/api/refresh/nft-data',
+  path: '/api/refresh/nft-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRefreshVerifiedSalesRoute = ApiRefreshVerifiedSalesRouteImport.update({
   id: '/api/refresh/verified-sales',
   path: '/api/refresh/verified-sales',
@@ -153,6 +167,11 @@ const ApiRefreshVerifiedSalesRoute = ApiRefreshVerifiedSalesRouteImport.update({
 const ApiProvidersStatusRoute = ApiProvidersStatusRouteImport.update({
   id: '/api/providers/status',
   path: '/api/providers/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDiscoverNewMintsRoute = ApiDiscoverNewMintsRouteImport.update({
+  id: '/api/discover/new-mints',
+  path: '/api/discover/new-mints',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiNftsUntrackRoute = ApiNftsUntrackRouteImport.update({
@@ -468,13 +487,16 @@ export interface RootRouteChildren {
   ApiNftListRoute: typeof ApiNftListRoute
   ApiNftsRoute: typeof ApiNftsRouteWithChildren
   ApiVerifiedSalesRoute: typeof ApiVerifiedSalesRouteWithChildren
+  ApiDiscoverNewMintsRoute: typeof ApiDiscoverNewMintsRoute
   ApiProvidersStatusRoute: typeof ApiProvidersStatusRoute
+  ApiRefreshNftDataRoute: typeof ApiRefreshNftDataRoute
   ApiRefreshVerifiedSalesRoute: typeof ApiRefreshVerifiedSalesRoute
   ApiRwaMarketEnrichSaleRoute: typeof ApiRwaMarketEnrichSaleRoute
   ApiRwaMarketEventsRoute: typeof ApiRwaMarketEventsRoute
   ApiRwaMarketLatestSalesRoute: typeof ApiRwaMarketLatestSalesRoute
   ApiRwaMarketListedRoute: typeof ApiRwaMarketListedRoute
   ApiRwaMarketStatsRoute: typeof ApiRwaMarketStatsRoute
+  ApiScanNftMarketStatesRoute: typeof ApiScanNftMarketStatesRoute
   ApiSalesLatestRoute: typeof ApiSalesLatestRoute
   ApiIndexPokemonRoute: typeof ApiIndexPokemonRouteWithChildren
   ApiSalesMarketMarketRoute: typeof ApiSalesMarketMarketRoute
@@ -827,13 +849,16 @@ const rootRouteChildren: RootRouteChildren = {
   ApiNftListRoute: ApiNftListRoute,
   ApiNftsRoute: ApiNftsRouteWithChildren,
   ApiVerifiedSalesRoute: ApiVerifiedSalesRouteWithChildren,
+  ApiDiscoverNewMintsRoute: ApiDiscoverNewMintsRoute,
   ApiProvidersStatusRoute: ApiProvidersStatusRoute,
+  ApiRefreshNftDataRoute: ApiRefreshNftDataRoute,
   ApiRefreshVerifiedSalesRoute: ApiRefreshVerifiedSalesRoute,
   ApiRwaMarketEnrichSaleRoute: ApiRwaMarketEnrichSaleRoute,
   ApiRwaMarketEventsRoute: ApiRwaMarketEventsRoute,
   ApiRwaMarketLatestSalesRoute: ApiRwaMarketLatestSalesRoute,
   ApiRwaMarketListedRoute: ApiRwaMarketListedRoute,
   ApiRwaMarketStatsRoute: ApiRwaMarketStatsRoute,
+  ApiScanNftMarketStatesRoute: ApiScanNftMarketStatesRoute,
   ApiSalesLatestRoute: ApiSalesLatestRoute,
   ApiIndexPokemonRoute: ApiIndexPokemonRouteWithChildren,
   ApiSalesMarketMarketRoute: ApiSalesMarketMarketRoute,

@@ -4,14 +4,17 @@ export const Route = createFileRoute("/api/nfts/status")({
   server: {
     handlers: {
       GET: async () => {
-        const [{ readNftDb }, { getAllowedNftCollections }, { nftDatabasePath }, { nftDbExtendedStats }] = await Promise.all([
+        const [{ readNftDb }, { getAllowedNftCollections }, { nftDatabasePath }, { nftDbExtendedStats }, { readNftScannerConfig }, { getProviderScanStatuses }] = await Promise.all([
           import("@/services/nftStore"),
           import("@/services/trackedNftsConfig"),
           import("@/services/nftSqliteDb"),
           import("@/services/nftCollectionIngestionService"),
+          import("@/services/nftScannerConfig"),
+          import("@/services/nftScannerStatusService"),
         ]);
         const db = await readNftDb();
         const allowedCollections = getAllowedNftCollections();
+        const scannerConfig = readNftScannerConfig();
         const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
         const stats = nftDbExtendedStats();
         return Response.json({
@@ -41,6 +44,17 @@ export const Route = createFileRoute("/api/nfts/status")({
             hiddenOtherNftCount: stats.hiddenOtherNftCount,
             latestIngestionReportPath: db.queue_state.latestIngestionReportPath ?? stats.latestIngestionReportPath,
             latestUniverseComparisonReportPath: db.queue_state.latestUniverseComparisonReportPath ?? stats.latestUniverseComparisonReportPath,
+          },
+          scanner: {
+            dryRun: scannerConfig.dryRun,
+            enabled: scannerConfig.enabled,
+            batchSize: scannerConfig.batchSize,
+            intervalSeconds: scannerConfig.intervalSeconds,
+            maxRetries: scannerConfig.maxRetries,
+            newMintDiscoveryEnabled: scannerConfig.newMintDiscoveryEnabled,
+            newMintDiscoveryIntervalSeconds: scannerConfig.newMintDiscoveryIntervalSeconds,
+            newMintDiscoveryLimitPerCollection: scannerConfig.newMintDiscoveryLimitPerCollection,
+            scanStatuses: getProviderScanStatuses(),
           },
           database: {
             ok: true,

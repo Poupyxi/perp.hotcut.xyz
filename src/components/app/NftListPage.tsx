@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { RelativeTime } from "./RelativeTime";
 import { categoryIcon } from "./categoryIcons";
+import { ScannerStatusPanel } from "./ScannerStatusPanel";
 
 type NftAsset = {
   mint: string;
@@ -259,6 +260,8 @@ export function NftListPage() {
         <Stat label="Other on page" value={loading ? "..." : otherAssets.toString()} />
         <Stat label="Listed on page" value={loading ? "..." : listedAssets.toString()} />
       </div>
+
+      <ScannerStatusPanel />
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="grid md:grid-cols-5 gap-3">

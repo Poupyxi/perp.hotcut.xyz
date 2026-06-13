@@ -4,6 +4,12 @@ function env() {
   return (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
 }
 
+function authorized(request: Request) {
+  const secret = env().REFRESH_SECRET;
+  if (!secret) return false;
+  return request.headers.get("x-refresh-secret") === secret || request.headers.get("authorization") === `Bearer ${secret}`;
+}
+
 function optionalNumber(value: string | null) {
   if (!value) return null;
   const parsed = Number(value);
@@ -16,31 +22,24 @@ function optionalBoolean(value: string | null) {
   return null;
 }
 
-function authorized(request: Request) {
-  const secret = env().REFRESH_SECRET;
-  if (!secret) return false;
-  const headerSecret = request.headers.get("x-refresh-secret");
-  const auth = request.headers.get("authorization");
-  return headerSecret === secret || auth === `Bearer ${secret}`;
-}
-
-export const Route = createFileRoute("/api/refresh/verified-sales")({
+export const Route = createFileRoute("/api/discover/new-mints")({
   server: {
     handlers: {
       POST: async ({ request }) => {
         if (!env().REFRESH_SECRET) {
-          return Response.json({ error: "Verified sales refresh endpoint is disabled until REFRESH_SECRET is configured." }, { status: 503 });
+          return Response.json({ error: "New mint discovery endpoint is disabled until REFRESH_SECRET is configured." }, { status: 503 });
         }
         if (!authorized(request)) {
           return Response.json({ error: "Unauthorized" }, { status: 401 });
         }
 
         const url = new URL(request.url);
-        const { scanAllNFTMarketStates } = await import("@/services/nftMarketStateScannerService");
-        const result = await scanAllNFTMarketStates({
-          mint: url.searchParams.get("mint"),
-          limit: optionalNumber(url.searchParams.get("limit")),
+        const { discoverNewMintsFromTrackedCollections } = await import("@/services/nftMintDiscoveryService");
+        const result = await discoverNewMintsFromTrackedCollections({
+          collection: url.searchParams.get("collection"),
+          limitPerCollection: optionalNumber(url.searchParams.get("limitPerCollection")),
           dryRun: optionalBoolean(url.searchParams.get("dryRun")),
+          storeRaw: optionalBoolean(url.searchParams.get("storeRaw")) ?? false,
         });
 
         return Response.json(result, { headers: { "Cache-Control": "no-store" } });

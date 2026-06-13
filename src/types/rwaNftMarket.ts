@@ -24,7 +24,7 @@ export type NFTMarketStatus =
 
 export type NFTMarketValidationStatus = "unverified" | "verified" | "failed";
 
-export type NFTMarketActivityType = "listed" | "sold" | "delisted" | "transfer" | "unknown";
+export type NFTMarketActivityType = "listed" | "sold" | "delisted" | "transfer" | "minted" | "unknown";
 
 export type NFTMarketActivity = {
   provider: string;
@@ -42,6 +42,7 @@ export type NFTMarketActivity = {
 };
 
 export type NFTListingState = {
+  id?: string;
   assetMint: string;
   provider: string;
   marketplace: string | null;
@@ -56,12 +57,78 @@ export type NFTListingState = {
   rawPayload: unknown;
 };
 
+export type NFTAsset = {
+  id: string;
+  assetMint: string;
+  assetName: string | null;
+  imageUrl: string | null;
+  market: string | null;
+  collectionSlug: string | null;
+  collectionName: string | null;
+  ownerWallet: string | null;
+  metadataUri: string | null;
+  sourceProvider: string | null;
+  discoveredAt: string | null;
+  lastSeenAt: string | null;
+  currentStatus: NFTMarketStatus;
+  latestMarketPriceSol: number | null;
+  latestMarketPriceUsd: number | null;
+  latestSalePriceSol: number | null;
+  latestSalePriceUsd: number | null;
+  latestListingPriceSol: number | null;
+  latestListingPriceUsd: number | null;
+  latestProvider: string | null;
+  latestMarketplace: string | null;
+  latestTxHash: string | null;
+  lastListedAt: string | null;
+  lastSoldAt: string | null;
+  lastCheckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface ProviderMarketActivityConnector {
   providerId: string;
   fetchActivityForNFT(assetMint: string): Promise<NFTMarketActivity[]>;
   fetchLatestSaleForNFT(assetMint: string): Promise<RwaNftMarketEvent | null>;
   fetchActiveListingForNFT(assetMint: string): Promise<NFTListingState | null>;
 }
+
+export type DiscoveredNFTMint = {
+  assetMint: string;
+  assetName: string | null;
+  imageUrl: string | null;
+  market: string | null;
+  collectionSlug: string | null;
+  collectionName: string | null;
+  ownerWallet: string | null;
+  metadataUri: string | null;
+  sourceProvider: string;
+  rawPayload: unknown;
+};
+
+export interface ProviderMintDiscoveryConnector {
+  providerId: string;
+  discoverMints(params: {
+    collectionSlug: string;
+    market: string;
+    limit?: number;
+    cursor?: string;
+  }): Promise<DiscoveredNFTMint[]>;
+}
+
+export type ProviderScanStatus = {
+  provider: string;
+  scanType: "market_state" | "new_mints" | "sales" | "listings";
+  status: "live" | "unavailable" | "needs_api_key" | "needs_endpoint" | "needs_chain_ids" | "error";
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  itemsChecked: number;
+  itemsFound: number;
+  itemsStored: number;
+  durationMs: number;
+};
 
 export type NFTMarketState = {
   nftId: string;
@@ -91,6 +158,7 @@ export type NFTMarketState = {
   lastCheckedAt: string | null;
   validationStatus: NFTMarketValidationStatus;
   rawPayload: unknown;
+  rawProviderPayloads?: unknown[];
 };
 
 export type RwaNftCategory =

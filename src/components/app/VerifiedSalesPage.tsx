@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { RelativeTime } from "./RelativeTime";
 import { categoryIcon } from "./categoryIcons";
+import { ScannerStatusPanel } from "./ScannerStatusPanel";
 
 type VerifiedSale = {
   id: string;
@@ -327,6 +328,8 @@ export function VerifiedSalesPage() {
         <Stat label="SOL volume" value={loading ? "..." : fmtSol(solVolume)} />
         <Stat label="USD volume" value={loading ? "..." : fmtUsd(usdVolume)} />
       </div>
+
+      <ScannerStatusPanel />
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="grid md:grid-cols-4 gap-3">
