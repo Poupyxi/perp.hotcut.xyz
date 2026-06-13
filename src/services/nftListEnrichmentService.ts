@@ -366,7 +366,9 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
   const dryRun = config.nftListEnrichDryRun;
   const startedAt = nowIso();
   const startedMs = Date.now();
-  const rows = selectAssets(options, config.nftListEnrichBatchSize);
+  const focusMint = config.nftListEnrichFocusMint;
+  const selectionOptions = focusMint ? { ...options, mint: focusMint, limit: 1 } : options;
+  const rows = selectAssets(selectionOptions, config.nftListEnrichBatchSize);
   const errors: EnrichNFTListResult["errors"] = [];
   const changes: EnrichedNftChange[] = [];
   let metadataUpdated = 0;
@@ -380,6 +382,7 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
   let verifiedSalesStored = 0;
 
   console.log(`[NFT LIST ENRICH] Starting dryRun=${dryRun} batchSize=${config.nftListEnrichBatchSize}`);
+  if (focusMint) console.log(`[NFT LIST ENRICH] Focus mode enabled: ${focusMint}`);
 
   for (const row of rows) {
     const mint = asString(row.mint);

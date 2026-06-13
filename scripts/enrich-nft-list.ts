@@ -1,4 +1,19 @@
+import { existsSync, readFileSync } from "node:fs";
+
 import { enrichNFTList } from "../src/services/nftListEnrichmentService";
+
+function loadLocalEnvFile() {
+  if (!existsSync(".env")) return;
+  for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator === -1) continue;
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim().replace(/^["']|["']$/g, "");
+    if (key && process.env[key] === undefined) process.env[key] = value;
+  }
+}
 
 function argValue(name: string) {
   const prefix = `--${name}=`;
@@ -21,6 +36,7 @@ function booleanArg(name: string) {
 }
 
 async function main() {
+  loadLocalEnvFile();
   const forceDryRun = process.argv.includes("--dry-run");
   const result = await enrichNFTList({
     mint: argValue("mint"),
