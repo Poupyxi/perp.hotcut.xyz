@@ -13,6 +13,8 @@ export type NftScannerConfig = {
   nftListEnrichMaxRetries: number;
   nftListEnrichDryRun: boolean;
   nftListEnrichFocusMint: string | null;
+  nftListEnrichTtlSeconds: number;
+  nftListEnrichRefreshCooldownSeconds: number;
   trackedCollections: string[];
   magicEdenCollectionSymbols: string[];
   tensorCollectionSlugs: string[];
@@ -76,6 +78,8 @@ export function readNftScannerConfig(input: { dryRun?: boolean | null } = {}): N
     nftListEnrichMaxRetries: numberEnv("NFT_LIST_ENRICH_MAX_RETRIES", 3),
     nftListEnrichDryRun: input.dryRun === true ? true : input.dryRun === false ? nftListDryRun : nftListDryRun,
     nftListEnrichFocusMint: stringEnv("NFT_LIST_ENRICH_FOCUS_MINT"),
+    nftListEnrichTtlSeconds: numberEnv("NFT_LIST_ENRICH_TTL_SECONDS", 600),
+    nftListEnrichRefreshCooldownSeconds: numberEnv("NFT_LIST_ENRICH_REFRESH_COOLDOWN_SECONDS", 30),
     trackedCollections: csvEnv("TRACKED_COLLECTIONS", ["pokemon-cards", "one-piece-cards", "nba-cards", "nfl-cards", "nhl-cards"]),
     magicEdenCollectionSymbols: csvEnv("MAGIC_EDEN_COLLECTION_SYMBOLS"),
     tensorCollectionSlugs: csvEnv("TENSOR_COLLECTION_SLUGS"),

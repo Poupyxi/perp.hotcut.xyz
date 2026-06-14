@@ -102,6 +102,8 @@ NFT_LIST_ENRICH_BATCH_SIZE=50
 NFT_LIST_ENRICH_MAX_RETRIES=3
 NFT_LIST_ENRICH_DRY_RUN=true
 NFT_LIST_ENRICH_FOCUS_MINT=
+NFT_LIST_ENRICH_TTL_SECONDS=600
+NFT_LIST_ENRICH_REFRESH_COOLDOWN_SECONDS=30
 
 ENABLE_NEW_MINT_DISCOVERY=true
 NEW_MINT_DISCOVERY_INTERVAL_SECONDS=1800
@@ -116,6 +118,8 @@ BEEZIE_COLLECTION_IDS=
 ```
 
 Provider credentials and endpoints are read from environment variables. Secrets must not be hardcoded.
+
+For on-demand mint lookup, the app can call `GET /api/nfts/:mint?refresh=true`. The API checks the SQLite cache first, refreshes from Helius when the NFT is missing, stale, or incomplete, and falls back to cached data if Helius is unavailable.
 
 ## API Endpoints
 

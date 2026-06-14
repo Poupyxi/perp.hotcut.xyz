@@ -110,6 +110,87 @@ function selectAssets(options: EnrichNFTListOptions, limit: number) {
   return getNftDb().prepare(sql).all(...params) as SqlRow[];
 }
 
+function loadAssetByMint(mint: string) {
+  return getNftDb().prepare("SELECT * FROM nft_assets WHERE mint = ?").get(mint) as SqlRow | undefined;
+}
+
+function parseDate(value: unknown) {
+  const text = asString(value);
+  if (!text) return null;
+  const time = Date.parse(text);
+  return Number.isFinite(time) ? time : null;
+}
+
+function rowMetadataStatus(row: SqlRow) {
+  const value = asString(row.metadata_status);
+  if (value) return value;
+  const complete = Boolean(asString(row.name) && asString(row.image) && asString(row.owner));
+  if (complete) return "complete";
+  if (asString(row.name) || asString(row.image) || asString(row.owner)) return "partial";
+  return "missing";
+}
+
+function rowToNftDto(row: SqlRow) {
+  return {
+    assetMint: asString(row.mint),
+    assetName: asString(row.name),
+    imageUrl: asString(row.image),
+    market: asString(row.market),
+    category: asString(row.category) ?? "unknown",
+    collectionSlug: asString(row.source_collection) ?? asString(row.collection),
+    collectionName: asString(row.collection_name) ?? asString(row.collection),
+    assetType: asString(row.asset_type) ?? "unknown",
+    ownerWallet: asString(row.owner),
+    source: asString(row.source_collection),
+    provider: asString(row.source_provider) ?? asString(row.latest_provider),
+    currentState: asString(row.current_state) ?? asString(row.current_status) ?? "unknown",
+    lastActivityType: asString(row.last_activity_type) ?? "unknown",
+    lastActivityAt: asString(row.last_activity_at),
+    lastActivityTxHash: asString(row.last_activity_tx_hash),
+    lastActivityProvider: asString(row.last_activity_provider),
+    latestListingPriceSol: typeof row.listed_price_sol === "number" ? row.listed_price_sol : null,
+    latestListingPriceUsd: typeof row.listed_price_usd === "number" ? row.listed_price_usd : null,
+    listingMarketplace: asString(row.listing_marketplace),
+    lastListedAt: asString(row.listing_updated_at),
+    latestMarketPriceSol: typeof row.latest_market_price_sol === "number" ? row.latest_market_price_sol : null,
+    latestMarketPriceUsd: typeof row.latest_market_price_usd === "number" ? row.latest_market_price_usd : null,
+    latestPurchasePriceSol: typeof row.latest_purchase_price_sol === "number" ? row.latest_purchase_price_sol : null,
+    latestPurchasePriceUsd: typeof row.latest_purchase_price_usd === "number" ? row.latest_purchase_price_usd : null,
+    latestMarketplace: asString(row.latest_marketplace),
+    latestProvider: asString(row.latest_provider),
+    latestTxHash: asString(row.latest_tx_hash),
+    lastCheckedAt: asString(row.last_checked_at),
+    metadataStatus: rowMetadataStatus(row),
+    validationStatus: asString(row.validation_status) ?? "unverified",
+    updatedAt: asString(row.updated_at),
+    lastSalePriceSol: typeof row.last_sale_price_sol === "number" ? row.last_sale_price_sol : null,
+    lastSalePriceUsd: typeof row.last_sale_price_usd === "number" ? row.last_sale_price_usd : null,
+    lastSaleAt: asString(row.last_sale_at),
+    lastSaleMarketplace: asString(row.last_sale_marketplace),
+  };
+}
+
+function rowNeedsRefresh(row: SqlRow | undefined, ttlSeconds: number) {
+  if (!row) return true;
+  const ttlMs = ttlSeconds * 1000;
+  const checkedAt = parseDate(row.last_checked_at);
+  const ageMs = checkedAt ? Date.now() - checkedAt : Number.POSITIVE_INFINITY;
+  const stale = !checkedAt || ageMs > ttlMs;
+  const incomplete = rowMetadataStatus(row) !== "complete" || !asString(row.owner) || !asString(row.image);
+  return stale || incomplete;
+}
+
+function refreshCooldownActive(row: SqlRow | undefined, cooldownSeconds: number) {
+  if (!row) return false;
+  const lastCheckedAt = parseDate(row.last_checked_at);
+  if (!lastCheckedAt) return false;
+  return Date.now() - lastCheckedAt < cooldownSeconds * 1000;
+}
+
+function mergePreviewRow(baseRow: SqlRow | undefined, next: Partial<Record<string, unknown>>) {
+  return { ...(baseRow ?? {}), ...next } as SqlRow;
+}
+
 async function heliusRpc(method: string, params: unknown) {
   const apiKey = env().HELIUS_API_KEY;
   if (!apiKey) throw new Error("Missing HELIUS_API_KEY");
@@ -568,6 +649,358 @@ function statusFromRun(input: {
     ownersUpdated: input.ownersUpdated,
     lastActivitiesUpdated: input.lastActivitiesUpdated,
   };
+}
+
+export type RefreshNftByMintOptions = {
+  mint: string;
+  refresh?: boolean | null;
+  dryRun?: boolean | null;
+};
+
+export type RefreshNftByMintResult = {
+  nft: ReturnType<typeof rowToNftDto> | null;
+  cacheHit: boolean;
+  heliusCalled: boolean;
+  dbUpdated: boolean;
+  providerUsed: string | null;
+  reason: string;
+  verifiedSalesDetected: number;
+  verifiedSalesStored: number;
+  error: string | null;
+};
+
+async function insertAssetPlaceholderIfMissing(mint: string, market: string, normalized: ReturnType<typeof normalizeHeliusAsset>, metadataStatusValue: NFTMetadataStatus) {
+  const now = nowIso();
+  getNftDb().prepare(`
+    INSERT OR IGNORE INTO nft_assets (
+      id, mint, market, name, description, image, owner, collection, category, asset_type, public_group,
+      attributes_json, token_standard, interface, source_collection, is_staging, raw_helius_json,
+      current_state, current_status, last_activity_type, last_activity_at, last_activity_tx_hash, last_activity_provider,
+      latest_provider, latest_tx_hash, latest_market_price_sol, latest_market_price_usd, latest_purchase_price_sol,
+      latest_purchase_price_usd, metadata_status, validation_status, raw_market_state_json, last_checked_at,
+      last_seen_at, market_updated_at, updated_at, created_at
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, 0, ?,
+      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+  `).run(
+    mint,
+    mint,
+    market,
+    normalized.name,
+    normalized.description,
+    normalized.image,
+    normalized.owner,
+    normalized.collection,
+    "unknown",
+    "unknown",
+    "other",
+    stringifyJson(normalized.attributes),
+    normalized.tokenStandard,
+    normalized.interface,
+    normalized.collection,
+    shouldStoreRawHeliusJson() ? stringifyJson({ source: "helius", mint }) : null,
+    normalized.owner ? "owned" : "unknown",
+    normalized.owner ? "owned" : "unknown",
+    "unknown",
+    null,
+    null,
+    "helius",
+    "helius",
+    null,
+    null,
+    null,
+    null,
+    metadataStatusValue,
+    "unverified",
+    stringifyJson({ source: "helius", mode: "placeholder" }),
+    now,
+    now,
+    now,
+    now,
+    now,
+  );
+}
+
+function isFreshEnough(row: SqlRow | undefined, ttlSeconds: number) {
+  if (!row) return false;
+  const checkedAt = parseDate(row.last_checked_at);
+  if (!checkedAt) return false;
+  return Date.now() - checkedAt <= ttlSeconds * 1000;
+}
+
+function buildRefreshReason(row: SqlRow | undefined, ttlSeconds: number) {
+  if (!row) return "cache miss";
+  if (rowNeedsRefresh(row, ttlSeconds)) return "stale or incomplete";
+  return "fresh enough";
+}
+
+function mergeEnrichmentPreview(row: SqlRow | undefined, normalized: ReturnType<typeof normalizeHeliusAsset>, activity: ReturnType<typeof detectActivityFromTx>, metadata: NFTMetadataStatus, lastActivityAt: string | null, lastActivityTxHash: string | null) {
+  const detectedCategory = detectRwaNftCategory({
+    name: normalized.name,
+    description: normalized.description,
+    collection: normalized.collection,
+    attributes: normalized.attributes,
+  });
+  const detectedAssetType = detectCollectibleAssetType({
+    name: normalized.name,
+    description: normalized.description,
+    collection: normalized.collection,
+    attributes: normalized.attributes,
+    raw: normalized,
+  });
+  const base = row ?? { mint: normalized.mint, market: isAllowedRwaNftCategory(detectedCategory) ? detectedCategory : "unknown" };
+  const next: Record<string, unknown> = {
+    ...base,
+    mint: normalized.mint,
+    market: asString(base.market) ?? (isAllowedRwaNftCategory(detectedCategory) ? detectedCategory : "unknown"),
+    name: isMissingText(base.name) && normalized.name ? normalized.name : base.name ?? normalized.name ?? null,
+    description: isMissingText(base.description) && normalized.description ? normalized.description : base.description ?? normalized.description ?? null,
+    image: isMissingText(base.image) && normalized.image ? normalized.image : base.image ?? normalized.image ?? null,
+    owner: normalized.owner ?? asString(base.owner),
+    collection: asString(base.collection) ?? normalized.collection,
+    collection_name: asString(base.collection_name) ?? normalized.collection,
+    category: isAllowedRwaNftCategory(detectedCategory) && (!asString(base.category) || asString(base.category) === "unknown") ? detectedCategory : asString(base.category) ?? "unknown",
+    asset_type: detectedAssetType !== "unknown" && (!asString(base.asset_type) || asString(base.asset_type) === "unknown") ? detectedAssetType : asString(base.asset_type) ?? "unknown",
+    public_group: detectedAssetType !== "unknown" ? publicGroupForAssetType(detectedAssetType) : asString(base.public_group) ?? "other",
+    attributes_json: stringifyJson(normalized.attributes),
+    token_standard: asString(base.token_standard) ?? normalized.tokenStandard,
+    interface: asString(base.interface) ?? normalized.interface,
+    source_collection: asString(base.source_collection) ?? normalized.collection,
+    source_provider: asString(base.source_provider) ?? "helius",
+    current_state: activity.state,
+    current_status: activity.state,
+    last_activity_type: activity.type,
+    last_activity_at: lastActivityAt,
+    last_activity_tx_hash: lastActivityTxHash ?? asString(base.last_activity_tx_hash),
+    last_activity_provider: "helius",
+    latest_provider: "helius",
+    latest_tx_hash: activity.sale?.txSignature ?? asString(base.latest_tx_hash),
+    latest_market_price_sol: activity.sale?.priceSol ?? (typeof base.latest_market_price_sol === "number" ? base.latest_market_price_sol : null),
+    latest_market_price_usd: activity.sale?.priceUsd ?? (typeof base.latest_market_price_usd === "number" ? base.latest_market_price_usd : null),
+    latest_purchase_price_sol: activity.sale?.priceSol ?? (typeof base.latest_purchase_price_sol === "number" ? base.latest_purchase_price_sol : null),
+    latest_purchase_price_usd: activity.sale?.priceUsd ?? (typeof base.latest_purchase_price_usd === "number" ? base.latest_purchase_price_usd : null),
+    metadata_status: metadata,
+    validation_status: activity.sale?.txSignature ? "verified" : asString(base.validation_status) ?? "unverified",
+    raw_market_state_json: stringifyJson({
+      provider: "helius",
+      lastActivityType: activity.type,
+      lastActivityAt,
+      latestMarketPricePriority: activity.sale?.txSignature ? "verified_sale" : "unknown",
+    }),
+    last_checked_at: nowIso(),
+    last_seen_at: nowIso(),
+    market_updated_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  return next as SqlRow;
+}
+
+export async function refreshNftByMint(options: RefreshNftByMintOptions): Promise<RefreshNftByMintResult> {
+  const mint = options.mint.trim();
+  if (!mint) {
+    return {
+      nft: null,
+      cacheHit: false,
+      heliusCalled: false,
+      dbUpdated: false,
+      providerUsed: null,
+      reason: "missing mint",
+      verifiedSalesDetected: 0,
+      verifiedSalesStored: 0,
+      error: "Missing mint",
+    };
+  }
+
+  const config = readNftScannerConfig({ dryRun: options.dryRun });
+  const dryRun = config.nftListEnrichDryRun;
+  const row = loadAssetByMint(mint);
+  const cacheHit = Boolean(row) && !options.refresh && isFreshEnough(row, config.nftListEnrichTtlSeconds) && rowMetadataStatus(row ?? {}) === "complete";
+  const forceRefreshRequested = options.refresh === true;
+  const shouldRefresh = !cacheHit && (forceRefreshRequested || rowNeedsRefresh(row, config.nftListEnrichTtlSeconds) || !row);
+  const cooldownActive = refreshCooldownActive(row, config.nftListEnrichRefreshCooldownSeconds);
+
+  console.log(`[NFT LOOKUP] searched mint=${mint}`);
+  console.log(`[NFT LOOKUP] cache=${row ? "hit" : "miss"} fresh=${row ? isFreshEnough(row, config.nftListEnrichTtlSeconds) : false} complete=${row ? rowMetadataStatus(row) : "missing"}`);
+
+  if (row && cacheHit) {
+    console.log("[NFT LOOKUP] Helius skipped: cached NFT is fresh enough");
+    return {
+      nft: rowToNftDto(row),
+      cacheHit: true,
+      heliusCalled: false,
+      dbUpdated: false,
+      providerUsed: asString(row.source_provider) ?? asString(row.latest_provider) ?? null,
+      reason: "fresh cache hit",
+      verifiedSalesDetected: 0,
+      verifiedSalesStored: 0,
+      error: null,
+    };
+  }
+
+  if (row && forceRefreshRequested && cooldownActive) {
+    console.log("[NFT LOOKUP] Helius skipped: refresh cooldown active");
+    return {
+      nft: rowToNftDto(row),
+      cacheHit: true,
+      heliusCalled: false,
+      dbUpdated: false,
+      providerUsed: asString(row.source_provider) ?? asString(row.latest_provider) ?? null,
+      reason: "refresh cooldown active",
+      verifiedSalesDetected: 0,
+      verifiedSalesStored: 0,
+      error: null,
+    };
+  }
+
+  if (!shouldRefresh && row) {
+    console.log("[NFT LOOKUP] Helius skipped: existing NFT does not need refresh");
+    return {
+      nft: rowToNftDto(row),
+      cacheHit: true,
+      heliusCalled: false,
+      dbUpdated: false,
+      providerUsed: asString(row.source_provider) ?? asString(row.latest_provider) ?? null,
+      reason: "not stale",
+      verifiedSalesDetected: 0,
+      verifiedSalesStored: 0,
+      error: null,
+    };
+  }
+
+  console.log(`[NFT LOOKUP] Helius called: ${row ? "stale/incomplete" : "missing"}`);
+
+  let verifiedSalesDetected = 0;
+  let verifiedSalesStored = 0;
+  let dbUpdated = false;
+  try {
+    const rawAsset = await withRetries(config.nftListEnrichMaxRetries, () => getAssetByMint(mint));
+    const normalized = normalizeHeliusAsset(rawAsset, asString(row?.market) ?? asString(row?.category) ?? "unknown");
+    const metadata = metadataStatus({ name: normalized.name, image: normalized.image, owner: normalized.owner });
+    const signatures = await withRetries(config.nftListEnrichMaxRetries, () => recentSignaturesForMint(mint, 8));
+    const signatureValues = signatures.map((signature) => asString(signature.signature)).filter((signature): signature is string => Boolean(signature));
+    const txs = await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)));
+    const latestTx = txs[0] ?? null;
+    const activity = latestTx
+      ? detectActivityFromTx(latestTx, mint, normalized.owner)
+      : {
+          type: "unknown" as const,
+          state: normalized.owner ? "owned" as const : "unknown" as const,
+          sale: null,
+          reason: "no recent transaction found",
+          debug: {
+            detectedType: null,
+            source: null,
+            description: null,
+            instructionPrograms: [],
+            nativeTransfers: [],
+            tokenTransfers: [],
+            nftTransfers: [],
+          },
+        };
+    const lastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
+    const lastActivityTxHash = latestTx ? txSignature(latestTx) : null;
+    const detectedCategory = detectRwaNftCategory({
+      name: normalized.name,
+      description: normalized.description,
+      collection: normalized.collection,
+      attributes: normalized.attributes,
+    });
+    const detectedAssetType = detectCollectibleAssetType({
+      name: normalized.name,
+      description: normalized.description,
+      collection: normalized.collection,
+      attributes: normalized.attributes,
+      raw: rawAsset,
+    });
+
+    if (latestTx) {
+      console.log(`[NFT LOOKUP][DEBUG] txType=${activity.debug.detectedType ?? "unknown"} source=${activity.debug.source ?? "unknown"} description=${activity.debug.description ?? "unknown"}`);
+      console.log(`[NFT LOOKUP][DEBUG] instructionPrograms=${activity.debug.instructionPrograms.length ? activity.debug.instructionPrograms.join(", ") : "none"}`);
+      console.log(`[NFT LOOKUP][DEBUG] nativeTransfers=${activity.debug.nativeTransfers.length ? activity.debug.nativeTransfers.join(" | ") : "none"}`);
+      console.log(`[NFT LOOKUP][DEBUG] tokenTransfers=${activity.debug.tokenTransfers.length ? activity.debug.tokenTransfers.join(" | ") : "none"}`);
+      console.log(`[NFT LOOKUP][DEBUG] nftTransfers=${activity.debug.nftTransfers.length ? activity.debug.nftTransfers.join(" | ") : "none"}`);
+      console.log(`[NFT LOOKUP][DEBUG] reason=${activity.reason}`);
+    }
+
+    if (activity.sale?.txSignature) {
+      verifiedSalesDetected += 1;
+    }
+
+    const market = row?.market && asString(row.market) ? asString(row.market) : isAllowedRwaNftCategory(detectedCategory) ? detectedCategory : "unknown";
+    const previewRow = mergeEnrichmentPreview(row, normalized, activity, metadata, lastActivityAt, lastActivityTxHash);
+
+    if (dryRun) {
+      console.log(`[NFT LOOKUP][DRY RUN] ${mint} state=${activity.state} lastActivity=${activity.type} tx=${lastActivityTxHash ?? "none"}`);
+      return {
+        nft: rowToNftDto(previewRow),
+        cacheHit: false,
+        heliusCalled: true,
+        dbUpdated: false,
+        providerUsed: "helius",
+        reason: activity.reason,
+        verifiedSalesDetected,
+        verifiedSalesStored: 0,
+        error: null,
+      };
+    }
+
+    if (!row) {
+      insertAssetPlaceholderIfMissing(mint, market, normalized, metadata);
+    }
+
+    if (activity.sale?.txSignature) {
+      const category = activity.sale.category ?? (isAllowedRwaNftCategory(detectedCategory) ? detectedCategory : asString(row?.category));
+      const result = await saveRwaNftMarketEvent({ ...activity.sale, category });
+      if (result.saved) verifiedSalesStored += 1;
+    }
+
+    updateAssetFromEnrichment({
+      row: row ?? mergePreviewRow(null, { mint, market, category: market, asset_type: "unknown", public_group: "other" }),
+      normalized,
+      rawAsset,
+      currentState: activity.state,
+      lastActivityType: activity.type,
+      lastActivityAt,
+      lastActivityTxHash,
+      sale: activity.sale,
+      metadataStatus: metadata,
+    });
+    dbUpdated = true;
+    const updatedRow = loadAssetByMint(mint) ?? previewRow;
+    console.log(`[NFT LOOKUP] DB updated=${dbUpdated} provider=helius`);
+    return {
+      nft: rowToNftDto(updatedRow),
+      cacheHit: false,
+      heliusCalled: true,
+      dbUpdated,
+      providerUsed: "helius",
+      reason: activity.reason,
+      verifiedSalesDetected,
+      verifiedSalesStored,
+      error: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "NFT provider unavailable";
+    console.log(`[NFT LOOKUP] Helius failed: ${message}`);
+    if (row) {
+      return {
+        nft: rowToNftDto(row),
+        cacheHit: true,
+        heliusCalled: true,
+        dbUpdated: false,
+        providerUsed: asString(row.source_provider) ?? asString(row.latest_provider) ?? "helius",
+        reason: "provider failure, returned cached result",
+        verifiedSalesDetected: 0,
+        verifiedSalesStored: 0,
+        error: message,
+      };
+    }
+    throw new Error("NFT not found or provider unavailable");
+  }
 }
 
 export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise<EnrichNFTListResult> {

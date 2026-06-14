@@ -116,6 +116,53 @@ function short(value: string | null | undefined) {
   return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }
 
+function looksLikeMint(value: string) {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value.trim());
+}
+
+function nftFromLookupResponse(nft: Record<string, unknown>, fallbackMint: string): NftAsset {
+  return {
+    mint: typeof nft.assetMint === "string" ? nft.assetMint : typeof nft.mint === "string" ? nft.mint : fallbackMint,
+    name: typeof nft.assetName === "string" ? nft.assetName : typeof nft.name === "string" ? nft.name : null,
+    image: typeof nft.imageUrl === "string" ? nft.imageUrl : typeof nft.image === "string" ? nft.image : null,
+    owner: typeof nft.ownerWallet === "string" ? nft.ownerWallet : typeof nft.owner === "string" ? nft.owner : null,
+    collection: typeof nft.collectionSlug === "string" ? nft.collectionSlug : typeof nft.collection === "string" ? nft.collection : null,
+    collectionName: typeof nft.collectionName === "string" ? nft.collectionName : typeof nft.collection === "string" ? nft.collection : null,
+    sourceCollection: typeof nft.source === "string" ? nft.source : typeof nft.sourceCollection === "string" ? nft.sourceCollection : null,
+    sourceProvider: typeof nft.provider === "string" ? nft.provider : null,
+    category: typeof nft.category === "string" ? nft.category : "unknown",
+    assetType: typeof nft.assetType === "string" ? nft.assetType : "unknown",
+    publicGroup: typeof nft.publicGroup === "string" ? nft.publicGroup : "other",
+    isStaging: false,
+    isListed: false,
+    currentState: typeof nft.currentState === "string" ? nft.currentState : "unknown",
+    currentStatus: typeof nft.currentStatus === "string" ? nft.currentStatus : typeof nft.currentState === "string" ? nft.currentState : "unknown",
+    lastActivityType: typeof nft.lastActivityType === "string" ? nft.lastActivityType : "unknown",
+    lastActivityAt: typeof nft.lastActivityAt === "string" ? nft.lastActivityAt : null,
+    lastActivityTxHash: typeof nft.lastActivityTxHash === "string" ? nft.lastActivityTxHash : null,
+    lastActivityProvider: typeof nft.lastActivityProvider === "string" ? nft.lastActivityProvider : null,
+    latestListingPriceSol: typeof nft.latestListingPriceSol === "number" ? nft.latestListingPriceSol : null,
+    latestListingPriceUsd: typeof nft.latestListingPriceUsd === "number" ? nft.latestListingPriceUsd : null,
+    listingMarketplace: typeof nft.listingMarketplace === "string" ? nft.listingMarketplace : null,
+    lastListedAt: typeof nft.lastListedAt === "string" ? nft.lastListedAt : null,
+    latestMarketPriceSol: typeof nft.latestMarketPriceSol === "number" ? nft.latestMarketPriceSol : null,
+    latestMarketPriceUsd: typeof nft.latestMarketPriceUsd === "number" ? nft.latestMarketPriceUsd : null,
+    latestPurchasePriceSol: typeof nft.latestPurchasePriceSol === "number" ? nft.latestPurchasePriceSol : null,
+    latestPurchasePriceUsd: typeof nft.latestPurchasePriceUsd === "number" ? nft.latestPurchasePriceUsd : null,
+    latestMarketplace: typeof nft.latestMarketplace === "string" ? nft.latestMarketplace : null,
+    latestProvider: typeof nft.latestProvider === "string" ? nft.latestProvider : null,
+    latestTxHash: typeof nft.latestTxHash === "string" ? nft.latestTxHash : null,
+    lastCheckedAt: typeof nft.lastCheckedAt === "string" ? nft.lastCheckedAt : null,
+    metadataStatus: typeof nft.metadataStatus === "string" ? nft.metadataStatus : "missing",
+    validationStatus: typeof nft.validationStatus === "string" ? nft.validationStatus : "unverified",
+    updatedAt: typeof nft.updatedAt === "string" ? nft.updatedAt : null,
+    lastSalePriceSol: typeof nft.lastSalePriceSol === "number" ? nft.lastSalePriceSol : null,
+    lastSalePriceUsd: typeof nft.lastSalePriceUsd === "number" ? nft.lastSalePriceUsd : null,
+    lastSaleAt: typeof nft.lastSaleAt === "string" ? nft.lastSaleAt : null,
+    lastSaleMarketplace: typeof nft.lastSaleMarketplace === "string" ? nft.lastSaleMarketplace : null,
+  };
+}
+
 function categoryLabel(category: string) {
   return CATEGORY_OPTIONS.find(([value]) => value === category)?.[1] ?? category;
 }
@@ -201,6 +248,8 @@ export function NftListPage() {
   const [limit] = useState(50);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mintLookupLoading, setMintLookupLoading] = useState(false);
+  const [mintLookupNote, setMintLookupNote] = useState<string | null>(null);
 
   const [category, setCategory] = useState("all");
   const [assetType, setAssetType] = useState("all");
@@ -242,8 +291,12 @@ export function NftListPage() {
     async function load(showLoading = true) {
       if (showLoading) setLoading(true);
       setError(null);
+      setMintLookupLoading(false);
+      setMintLookupNote(null);
 
       try {
+        const searchedMint = search.trim();
+        const isMintSearch = looksLikeMint(searchedMint);
         const response = await fetch(`/api/nft-list?${query}`, {
           signal: controller.signal,
           headers: { accept: "application/json" },
@@ -254,10 +307,31 @@ export function NftListPage() {
 
         setNfts(payload.nfts ?? []);
         setTotal(payload.total ?? 0);
+
+        if (isMintSearch && (payload.total ?? 0) === 0 && page === 1) {
+          setMintLookupLoading(true);
+          setMintLookupNote("Fetching NFT from Helius...");
+          const mintResponse = await fetch(`/api/nfts/${encodeURIComponent(searchedMint)}?refresh=true`, {
+            signal: controller.signal,
+            headers: { accept: "application/json" },
+          });
+
+          const mintPayload = await mintResponse.json() as { nft?: Record<string, unknown>; error?: string };
+          if (mintResponse.ok && mintPayload.nft) {
+            setNfts([nftFromLookupResponse(mintPayload.nft, searchedMint)]);
+            setTotal(1);
+            setMintLookupNote(null);
+          } else {
+            setNfts([]);
+            setTotal(0);
+            setMintLookupNote(mintPayload.error ?? "NFT not found or provider unavailable");
+          }
+        }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Unable to load NFT list");
       } finally {
+        setMintLookupLoading(false);
         if (showLoading) setLoading(false);
       }
     }
@@ -274,6 +348,7 @@ export function NftListPage() {
   const resultEnd = Math.min(page * limit, total);
   const hasNext = resultEnd < total;
   const hasPrevious = page > 1;
+  const loadingLabel = mintLookupLoading ? "Fetching NFT from Helius..." : "Loading results...";
 
   const visibleCards = nfts.filter((nft) => nft.assetType === "card").length;
   const otherAssets = nfts.filter((nft) => nft.assetType !== "card").length;
@@ -358,7 +433,7 @@ export function NftListPage() {
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3 text-sm text-muted-foreground flex items-center justify-between gap-3">
-          <span>{loading ? "Loading results..." : `Showing ${resultStart}-${resultEnd} of ${total.toLocaleString("en-US")} NFTs`}</span>
+          <span>{loading ? loadingLabel : `Showing ${resultStart}-${resultEnd} of ${total.toLocaleString("en-US")} NFTs`}</span>
           {!includeOther && !includeUnknown && <span className="text-xs">Cards only · other assets hidden</span>}
         </div>
 
@@ -383,7 +458,14 @@ export function NftListPage() {
             {loading ? (
               <tr><td colSpan={11} className="px-5 py-8 text-sm text-muted-foreground">Loading NFTs...</td></tr>
             ) : nfts.length === 0 ? (
-              <tr><td colSpan={11} className="px-5 py-8 text-sm text-muted-foreground">No NFTs match these filters.</td></tr>
+              <tr>
+                <td colSpan={11} className="px-5 py-8 text-sm text-muted-foreground">
+                  <div className="space-y-1">
+                    <div>No NFTs match these filters.</div>
+                    {mintLookupNote && <div className="text-xs">{mintLookupNote}</div>}
+                  </div>
+                </td>
+              </tr>
             ) : nfts.map((nft) => {
               const latestMarketPrice = fmtPrice(nft.latestMarketPriceSol, nft.latestMarketPriceUsd);
               const lastSale = fmtPrice(nft.lastSalePriceSol, nft.lastSalePriceUsd);
