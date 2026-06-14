@@ -325,6 +325,11 @@ function detectKnownPackSourcePattern(tx: Record<string, unknown>) {
   return patterns.find((pattern) => haystack.includes(pattern)) ?? null;
 }
 
+function isMarketplaceSource(tx: Record<string, unknown>) {
+  const source = asString(tx.source)?.toLowerCase() ?? "";
+  return ["magic_eden", "magic eden", "tensor", "hyperspace", "solanart"].some((pattern) => source.includes(pattern));
+}
+
 function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null) {
   const config = readNftScannerConfig();
   const saleEvents = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint }).filter((event) => event.eventType === "SALE");
@@ -346,6 +351,7 @@ function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, ow
   const sourcePatternMatch = detectKnownPackSourcePattern(tx);
   const mintTouched = accounts.includes(mint);
   const ownerTouched = Boolean(owner && accounts.includes(owner));
+  const marketplaceSource = isMarketplaceSource(tx);
 
   const matchedSignals = [
     ...programMatches.map((program) => `program:${program}`),
@@ -359,11 +365,27 @@ function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, ow
   const inferredReceiver = !explicitReceiver && ownerTouched && mintTouched && matchedSignals.length > 0 ? owner : null;
   const nftReceiver = explicitReceiver ?? inferredReceiver ?? null;
   const receivedByOwner = Boolean(owner && nftReceiver === owner);
+  const hasExplicitPackSignal = Boolean(
+    authorityMatches.length
+    || keywordMatches.length
+    || sourceKeywordMatch
+    || sourcePatternMatch,
+  );
 
   if (!receivedByOwner) {
     return {
       matched: false,
       reason: "tested NFT was not received by the current owner in this transaction",
+      nftReceiver,
+      matchedSignals,
+      matchedAccounts: authorityMatches,
+    };
+  }
+
+  if (marketplaceSource && !hasExplicitPackSignal) {
+    return {
+      matched: false,
+      reason: "marketplace source matched and only program-level pack evidence was present",
       nftReceiver,
       matchedSignals,
       matchedAccounts: authorityMatches,
