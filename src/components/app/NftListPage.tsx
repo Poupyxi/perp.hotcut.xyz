@@ -193,6 +193,15 @@ function currentStateValue(nft: Pick<NftAsset, "currentState" | "currentStatus" 
   return nft.isListed ? "listed" : "unknown";
 }
 
+function isActivelyListedValue(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed">) {
+  return currentStateValue(nft) === "listed" || nft.isListed === true;
+}
+
+function renderedLatestListingLabel(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed" | "latestListingPriceSol" | "latestListingPriceUsd">) {
+  if (!isActivelyListedValue(nft)) return "Not listed";
+  return fmtPrice(nft.latestListingPriceSol, nft.latestListingPriceUsd) ?? "Not listed";
+}
+
 function statusClass(value: string | null | undefined) {
   if (value === "listed") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
   if (value === "owned") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
@@ -358,7 +367,7 @@ export function NftListPage() {
 
   const visibleCards = nfts.filter((nft) => nft.assetType === "card").length;
   const otherAssets = nfts.filter((nft) => nft.assetType !== "card").length;
-  const listedAssets = nfts.filter((nft) => currentStateValue(nft) === "listed" || nft.isListed).length;
+  const listedAssets = nfts.filter((nft) => isActivelyListedValue(nft)).length;
 
   return (
     <div className="space-y-6">
@@ -474,12 +483,18 @@ export function NftListPage() {
               </tr>
             ) : nfts.map((nft) => {
               const currentState = currentStateValue(nft);
-              const isActivelyListed = currentState === "listed" || nft.isListed === true;
+              const isActivelyListed = isActivelyListedValue(nft);
               const latestMarketPrice = fmtPrice(nft.latestMarketPriceSol, nft.latestMarketPriceUsd);
               const lastSale = fmtPrice(nft.lastSalePriceSol, nft.lastSalePriceUsd);
-              const activeListing = isActivelyListed
-                ? fmtPrice(nft.latestListingPriceSol, nft.latestListingPriceUsd)
-                : null;
+              const activeListing = renderedLatestListingLabel(nft);
+              console.log("[NFT LIST][ROW]", {
+                mint: nft.mint,
+                currentState,
+                isListed: nft.isListed,
+                latestListingPriceSol: nft.latestListingPriceSol,
+                latestMarketPriceSol: nft.latestMarketPriceSol,
+                renderedLatestListingLabel: activeListing,
+              });
               return (
                 
                 <tr key={nft.mint} className="hover:bg-surface-raised/40 transition">
@@ -542,7 +557,7 @@ export function NftListPage() {
                     )}
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
-                    {isActivelyListed && activeListing ? (
+                    {isActivelyListed && activeListing !== "Not listed" ? (
                       <div>
                         <div className="font-mono">{activeListing}</div>
                         <div>{nft.listingMarketplace ?? "Listing source unknown"}</div>
