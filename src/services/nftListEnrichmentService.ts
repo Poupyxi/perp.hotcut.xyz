@@ -57,11 +57,6 @@ export type EnrichNFTListResult = {
 
 const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/";
 const HELIUS_ENHANCED_TX_URL = "https://api.helius.xyz/v0/transactions/";
-const KNOWN_PACK_OPEN_PROGRAM_IDS = new Set([
-  "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d",
-  "phygZDQZJZVHvJGYPGoKPYUtXw7mstSYtTtcuh8LJcC",
-]);
-
 function env(): RuntimeEnv {
   return (globalThis as unknown as { process?: { env?: RuntimeEnv } }).process?.env ?? {};
 }
@@ -282,45 +277,145 @@ function summarizeNftTransfers(tx: Record<string, unknown>) {
   });
 }
 
-function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, owner: string | null) {
+function nftTransferDetails(tx: Record<string, unknown>, mint: string) {
+  const eventNfts = recordArray(asRecord(asRecord(tx.events).nft).nfts);
+  const nftTransfers = Array.isArray(tx.nftTransfers) ? tx.nftTransfers.map(asRecord) : [];
+  return [...eventNfts, ...nftTransfers]
+    .map((transfer) => {
+      const transferMint = asString(transfer.mint) ?? asString(transfer.assetMint);
+      const from = asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress);
+      const to = asString(transfer.toUserAccount) ?? asString(transfer.toAddress);
+      return { mint: transferMint, from, to };
+    })
+    .filter((transfer) => transfer.mint === mint);
+}
+
+function paymentLooksLikeSecondarySale(tx: Record<string, unknown>, owner: string | null) {
+  if (!owner) return false;
+
+  const outgoingNative = (Array.isArray(tx.nativeTransfers) ? tx.nativeTransfers : [])
+    .map(asRecord)
+    .some((transfer) => {
+      const from = asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress);
+      const to = asString(transfer.toUserAccount) ?? asString(transfer.toAddress);
+      const amount = numberFromUnknown(transfer.amount) ?? 0;
+      return from === owner && to !== owner && amount > 0;
+    });
+  if (outgoingNative) return true;
+
+  const outgoingToken = (Array.isArray(tx.tokenTransfers) ? tx.tokenTransfers : [])
+    .map(asRecord)
+    .some((transfer) => {
+      const from = asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress);
+      const to = asString(transfer.toUserAccount) ?? asString(transfer.toAddress);
+      const amount = numberFromUnknown(transfer.tokenAmount) ?? numberFromUnknown(transfer.amount) ?? 0;
+      return from === owner && to !== owner && amount > 0;
+    });
+  return outgoingToken;
+}
+
+function collectionMatchesPackAllowlist(collectionAddress: string | null, allowlist: string[]) {
+  if (!collectionAddress) return false;
+  return allowlist.includes(collectionAddress);
+}
+
+function detectKnownPackSourcePattern(tx: Record<string, unknown>) {
+  const haystack = `${asString(tx.source)?.toLowerCase() ?? ""} ${asString(tx.description)?.toLowerCase() ?? ""}`;
+  const patterns = ["phygital", "collector crypt", "pack opening", "open pack", "pack reveal", "pack claim"];
+  return patterns.find((pattern) => haystack.includes(pattern)) ?? null;
+}
+
+function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null) {
+  const config = readNftScannerConfig();
   const saleEvents = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint }).filter((event) => event.eventType === "SALE");
-  if (saleEvents.length > 0) return null;
+  if (saleEvents.length > 0) return { matched: false, reason: "verified sale already detected for this NFT", nftReceiver: null, matchedSignals: [], matchedAccounts: [] };
 
   const text = textFromTx(tx);
   const programs = instructionPrograms(tx);
   const accounts = accountDataAccounts(tx);
-  const touchedMint = accounts.includes(mint);
-  const ownerTouched = owner ? accounts.includes(owner) : false;
-  const hasPackWording = /pack|opened?|reveal|claim/.test(text);
-  const hasKnownPackProgram = programs.some((program) => KNOWN_PACK_OPEN_PROGRAM_IDS.has(program));
+  const transfers = nftTransferDetails(tx, mint);
+  const explicitReceiver = transfers.find((transfer) => transfer.to)?.to ?? null;
+  const paymentSignal = paymentLooksLikeSecondarySale(tx, owner);
 
-  if (!touchedMint || !ownerTouched) return null;
-  if (!hasPackWording && !hasKnownPackProgram) return null;
+  const keywordMatches = config.packOpeningKeywords.filter((keyword) => text.includes(keyword.toLowerCase()));
+  const programMatches = programs.filter((program) => config.packOpeningProgramIds.includes(program));
+  const authorityMatches = accounts.filter((account) => config.packOpeningAuthorityAddresses.includes(account));
+  const collectionMatched = collectionMatchesPackAllowlist(collectionAddress, config.packOpeningCollectionAddresses);
+  const sourceText = `${asString(tx.source)?.toLowerCase() ?? ""} ${asString(tx.description)?.toLowerCase() ?? ""}`;
+  const sourceKeywordMatch = config.packOpeningKeywords.find((keyword) => sourceText.includes(keyword.toLowerCase())) ?? null;
+  const sourcePatternMatch = detectKnownPackSourcePattern(tx);
+  const mintTouched = accounts.includes(mint);
+  const ownerTouched = Boolean(owner && accounts.includes(owner));
 
-  const matchedProgram = programs.find((program) => KNOWN_PACK_OPEN_PROGRAM_IDS.has(program)) ?? null;
-  const reason = hasPackWording
-    ? "pack/open wording matched and the mint + owner were both touched"
-    : `known pack-opening program matched: ${matchedProgram}`;
+  const matchedSignals = [
+    ...programMatches.map((program) => `program:${program}`),
+    ...authorityMatches.map((account) => `authority:${account}`),
+    ...keywordMatches.map((keyword) => `keyword:${keyword}`),
+    ...(collectionMatched && collectionAddress ? [`collection:${collectionAddress}`] : []),
+    ...(sourceKeywordMatch ? [`source:${sourceKeywordMatch}`] : []),
+    ...(sourcePatternMatch ? [`source_pattern:${sourcePatternMatch}`] : []),
+  ];
+
+  const inferredReceiver = !explicitReceiver && ownerTouched && mintTouched && matchedSignals.length > 0 ? owner : null;
+  const nftReceiver = explicitReceiver ?? inferredReceiver ?? null;
+  const receivedByOwner = Boolean(owner && nftReceiver === owner);
+
+  if (!receivedByOwner) {
+    return {
+      matched: false,
+      reason: "tested NFT was not received by the current owner in this transaction",
+      nftReceiver,
+      matchedSignals,
+      matchedAccounts: authorityMatches,
+    };
+  }
+
+  if (paymentSignal) {
+    return {
+      matched: false,
+      reason: "outgoing payment pattern from current owner looks like a normal secondary sale",
+      nftReceiver,
+      matchedSignals,
+      matchedAccounts: authorityMatches,
+    };
+  }
+
+  if (matchedSignals.length === 0) {
+    return {
+      matched: false,
+      reason: "no pack-opening allowlist signal matched",
+      nftReceiver,
+      matchedSignals,
+      matchedAccounts: authorityMatches,
+    };
+  }
 
   return {
-    reason,
-    matchedProgram,
-    programs,
-    accounts,
-    text,
+    matched: true,
+    reason: explicitReceiver
+      ? `pack-opening allowlist signal matched: ${matchedSignals.join(", ")}`
+      : `pack-opening allowlist signal matched with inferred receiver from touched mint + owner: ${matchedSignals.join(", ")}`,
+    nftReceiver,
+    matchedSignals,
+    matchedAccounts: authorityMatches,
   };
 }
 
-function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: string | null): {
+function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null): {
   type: NFTLastActivityType;
   state: NFTMarketStatus;
   sale: RwaNftMarketEvent | null;
   reason: string;
   debug: {
+    txHash: string | null;
     detectedType: string | null;
+    currentOwner: string | null;
+    nftReceiver: string | null;
     source: string | null;
     description: string | null;
     instructionPrograms: string[];
+    matchedAllowlistAccounts: string[];
+    matchedPackSignal: boolean;
     nativeTransfers: string[];
     tokenTransfers: string[];
     nftTransfers: string[];
@@ -328,11 +423,26 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
 } {
   const sales = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint }).filter((event) => event.eventType === "SALE");
   const sale = sales[0] ?? null;
-  const packEvidence = detectPackOpeningEvidence(tx, mint, owner);
+  const packEvidence = detectPackOpeningEvidence(tx, mint, owner, collectionAddress);
   const instructionProgramList = instructionPrograms(tx);
   const nativeTransferSummary = summarizeNativeTransfers(tx);
   const tokenTransferSummary = summarizeTokenTransfers(tx);
   const nftTransferSummary = summarizeNftTransfers(tx);
+  const signature = txSignature(tx);
+  const commonDebug = {
+    txHash: signature,
+    detectedType: String(tx.type ?? null),
+    currentOwner: owner,
+    nftReceiver: packEvidence.nftReceiver,
+    source: asString(tx.source),
+    description: asString(tx.description),
+    instructionPrograms: instructionProgramList,
+    matchedAllowlistAccounts: packEvidence.matchedAccounts,
+    matchedPackSignal: packEvidence.matched,
+    nativeTransfers: nativeTransferSummary,
+    tokenTransfers: tokenTransferSummary,
+    nftTransfers: nftTransferSummary,
+  };
   if (sale?.txSignature) {
     const ownerIsBuyer = Boolean(owner && (sale.buyer === owner || sale.owner === owner));
     return {
@@ -340,33 +450,17 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: ownerIsBuyer ? "owned" : "sold",
       sale,
       reason: "verified sale detected by Helius enhanced transaction parser",
-      debug: {
-        detectedType: String(tx.type ?? null),
-        source: asString(tx.source),
-        description: asString(tx.description),
-        instructionPrograms: instructionProgramList,
-        nativeTransfers: nativeTransferSummary,
-        tokenTransfers: tokenTransferSummary,
-        nftTransfers: nftTransferSummary,
-      },
+      debug: commonDebug,
     };
   }
 
-  if (packEvidence) {
+  if (packEvidence.matched) {
     return {
       type: "pack_opened",
       state: owner ? "owned" : "unknown",
       sale: null,
       reason: packEvidence.reason,
-      debug: {
-        detectedType: String(tx.type ?? null),
-        source: asString(tx.source),
-        description: asString(tx.description),
-        instructionPrograms: instructionProgramList,
-        nativeTransfers: nativeTransferSummary,
-        tokenTransfers: tokenTransferSummary,
-        nftTransfers: nftTransferSummary,
-      },
+      debug: commonDebug,
     };
   }
 
@@ -377,15 +471,7 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: owner ? "owned" : "unknown",
       sale: null,
       reason: "transaction text included mint wording",
-      debug: {
-        detectedType: String(tx.type ?? null),
-        source: asString(tx.source),
-        description: asString(tx.description),
-        instructionPrograms: instructionProgramList,
-        nativeTransfers: nativeTransferSummary,
-        tokenTransfers: tokenTransferSummary,
-        nftTransfers: nftTransferSummary,
-      },
+      debug: commonDebug,
     };
   }
   if (text.includes("delist") || text.includes("cancel listing")) {
@@ -394,15 +480,7 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: "unlisted",
       sale: null,
       reason: "transaction text included delist/cancel listing wording",
-      debug: {
-        detectedType: String(tx.type ?? null),
-        source: asString(tx.source),
-        description: asString(tx.description),
-        instructionPrograms: instructionProgramList,
-        nativeTransfers: nativeTransferSummary,
-        tokenTransfers: tokenTransferSummary,
-        nftTransfers: nftTransferSummary,
-      },
+      debug: commonDebug,
     };
   }
   if (text.includes("list")) {
@@ -411,15 +489,7 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: "listed",
       sale: null,
       reason: "transaction text included list wording",
-      debug: {
-        detectedType: String(tx.type ?? null),
-        source: asString(tx.source),
-        description: asString(tx.description),
-        instructionPrograms: instructionProgramList,
-        nativeTransfers: nativeTransferSummary,
-        tokenTransfers: tokenTransferSummary,
-        nftTransfers: nftTransferSummary,
-      },
+      debug: commonDebug,
     };
   }
   if (text.includes("transfer")) {
@@ -427,32 +497,16 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       type: "transferred",
       state: owner ? "owned" : "transferred_out",
       sale: null,
-      reason: "transaction text only showed transfer wording and no stronger pack evidence was present",
-      debug: {
-        detectedType: String(tx.type ?? null),
-        source: asString(tx.source),
-        description: asString(tx.description),
-        instructionPrograms: instructionProgramList,
-        nativeTransfers: nativeTransferSummary,
-        tokenTransfers: tokenTransferSummary,
-        nftTransfers: nftTransferSummary,
-      },
+      reason: `transaction text only showed transfer wording and pack evidence stayed insufficient: ${packEvidence.reason}`,
+      debug: commonDebug,
     };
   }
   return {
     type: "unknown",
     state: owner ? "owned" : "unknown",
     sale: null,
-    reason: "no verified sale, pack-opening, mint, listing, or transfer pattern was strong enough",
-    debug: {
-      detectedType: String(tx.type ?? null),
-      source: asString(tx.source),
-      description: asString(tx.description),
-      instructionPrograms: instructionProgramList,
-      nativeTransfers: nativeTransferSummary,
-      tokenTransfers: tokenTransferSummary,
-      nftTransfers: nftTransferSummary,
-    },
+    reason: `no verified sale, pack-opening, mint, listing, or transfer pattern was strong enough: ${packEvidence.reason}`,
+    debug: commonDebug,
   };
 }
 
@@ -1031,17 +1085,22 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     const txs = await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)));
     const latestTx = txs[0] ?? null;
     const activity = latestTx
-      ? detectActivityFromTx(latestTx, mint, normalized.owner)
+      ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection)
       : {
           type: "unknown" as const,
           state: normalized.owner ? "owned" as const : "unknown" as const,
           sale: null,
           reason: "no recent transaction found",
           debug: {
+            txHash: null,
             detectedType: null,
+            currentOwner: normalized.owner,
+            nftReceiver: null,
             source: null,
             description: null,
             instructionPrograms: [],
+            matchedAllowlistAccounts: [],
+            matchedPackSignal: false,
             nativeTransfers: [],
             tokenTransfers: [],
             nftTransfers: [],
@@ -1064,8 +1123,10 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     });
 
     if (latestTx) {
+      console.log(`[NFT LOOKUP][DEBUG] mint=${mint} txHash=${activity.debug.txHash ?? "unknown"} currentOwner=${activity.debug.currentOwner ?? "unknown"} nftReceiver=${activity.debug.nftReceiver ?? "unknown"}`);
       console.log(`[NFT LOOKUP][DEBUG] txType=${activity.debug.detectedType ?? "unknown"} source=${activity.debug.source ?? "unknown"} description=${activity.debug.description ?? "unknown"}`);
       console.log(`[NFT LOOKUP][DEBUG] instructionPrograms=${activity.debug.instructionPrograms.length ? activity.debug.instructionPrograms.join(", ") : "none"}`);
+      console.log(`[NFT LOOKUP][DEBUG] allowlistAccounts=${activity.debug.matchedAllowlistAccounts.length ? activity.debug.matchedAllowlistAccounts.join(", ") : "none"} matchedPackSignal=${activity.debug.matchedPackSignal}`);
       console.log(`[NFT LOOKUP][DEBUG] nativeTransfers=${activity.debug.nativeTransfers.length ? activity.debug.nativeTransfers.join(" | ") : "none"}`);
       console.log(`[NFT LOOKUP][DEBUG] tokenTransfers=${activity.debug.tokenTransfers.length ? activity.debug.tokenTransfers.join(" | ") : "none"}`);
       console.log(`[NFT LOOKUP][DEBUG] nftTransfers=${activity.debug.nftTransfers.length ? activity.debug.nftTransfers.join(" | ") : "none"}`);
@@ -1211,8 +1272,27 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       const txs = await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)));
       const latestTx = txs[0] ?? null;
       const activity = latestTx
-        ? detectActivityFromTx(latestTx, mint, normalized.owner)
-        : { type: "unknown" as const, state: normalized.owner ? "owned" as const : "unknown" as const, sale: null };
+        ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection)
+        : {
+            type: "unknown" as const,
+            state: normalized.owner ? "owned" as const : "unknown" as const,
+            sale: null,
+            reason: "no recent transaction found",
+            debug: {
+              txHash: null,
+              detectedType: null,
+              currentOwner: normalized.owner,
+              nftReceiver: null,
+              source: null,
+              description: null,
+              instructionPrograms: [],
+              matchedAllowlistAccounts: [],
+              matchedPackSignal: false,
+              nativeTransfers: [],
+              tokenTransfers: [],
+              nftTransfers: [],
+            },
+          };
       const detectedCategory = detectRwaNftCategory({
         name: normalized.name,
         description: normalized.description,
@@ -1228,6 +1308,16 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       });
       const lastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
       const lastActivityTxHash = latestTx ? txSignature(latestTx) : null;
+      if (latestTx && focusMint === mint) {
+        console.log(`[NFT LIST ENRICH][DEBUG] mint=${mint} txHash=${activity.debug.txHash ?? "unknown"} currentOwner=${activity.debug.currentOwner ?? "unknown"} nftReceiver=${activity.debug.nftReceiver ?? "unknown"}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] txType=${activity.debug.detectedType ?? "unknown"} source=${activity.debug.source ?? "unknown"} description=${activity.debug.description ?? "unknown"}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] instructionPrograms=${activity.debug.instructionPrograms.length ? activity.debug.instructionPrograms.join(", ") : "none"}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] allowlistAccounts=${activity.debug.matchedAllowlistAccounts.length ? activity.debug.matchedAllowlistAccounts.join(", ") : "none"} matchedPackSignal=${activity.debug.matchedPackSignal}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] nativeTransfers=${activity.debug.nativeTransfers.length ? activity.debug.nativeTransfers.join(" | ") : "none"}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] tokenTransfers=${activity.debug.tokenTransfers.length ? activity.debug.tokenTransfers.join(" | ") : "none"}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] nftTransfers=${activity.debug.nftTransfers.length ? activity.debug.nftTransfers.join(" | ") : "none"}`);
+        console.log(`[NFT LIST ENRICH][DEBUG] reason=${activity.reason}`);
+      }
       const change = buildChange({
         row,
         normalized,
@@ -1249,15 +1339,6 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       if (change.lastActivityUpdated) lastActivitiesUpdated += 1;
       if (activity.sale?.txSignature) verifiedSalesDetected += 1;
       changes.push(change);
-
-      if (focusMint && latestTx) {
-        console.log(`[NFT LIST ENRICH][DEBUG] txType=${activity.debug.detectedType ?? "unknown"} source=${activity.debug.source ?? "unknown"} description=${activity.debug.description ?? "unknown"}`);
-        console.log(`[NFT LIST ENRICH][DEBUG] instructionPrograms=${activity.debug.instructionPrograms.length ? activity.debug.instructionPrograms.join(", ") : "none"}`);
-        console.log(`[NFT LIST ENRICH][DEBUG] nativeTransfers=${activity.debug.nativeTransfers.length ? activity.debug.nativeTransfers.join(" | ") : "none"}`);
-        console.log(`[NFT LIST ENRICH][DEBUG] tokenTransfers=${activity.debug.tokenTransfers.length ? activity.debug.tokenTransfers.join(" | ") : "none"}`);
-        console.log(`[NFT LIST ENRICH][DEBUG] nftTransfers=${activity.debug.nftTransfers.length ? activity.debug.nftTransfers.join(" | ") : "none"}`);
-        console.log(`[NFT LIST ENRICH][DEBUG] reason=${activity.reason}`);
-      }
 
       if (dryRun) {
         console.log(`[NFT LIST ENRICH][DRY RUN] ${mint} metadata=${metadata} state=${activity.state} lastActivity=${activity.type} tx=${lastActivityTxHash ?? "none"}`);

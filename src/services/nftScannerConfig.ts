@@ -21,6 +21,10 @@ export type NftScannerConfig = {
   phygitalsCollectionIds: string[];
   collectorCryptCollectionIds: string[];
   beezieCollectionIds: string[];
+  packOpeningProgramIds: string[];
+  packOpeningAuthorityAddresses: string[];
+  packOpeningCollectionAddresses: string[];
+  packOpeningKeywords: string[];
 };
 
 function env(): RuntimeEnv {
@@ -86,6 +90,13 @@ export function readNftScannerConfig(input: { dryRun?: boolean | null } = {}): N
     phygitalsCollectionIds: csvEnv("PHYGITALS_COLLECTION_IDS"),
     collectorCryptCollectionIds: csvEnv("COLLECTOR_CRYPT_COLLECTION_IDS"),
     beezieCollectionIds: csvEnv("BEEZIE_COLLECTION_IDS"),
+    packOpeningProgramIds: csvEnv("PACK_OPENING_PROGRAM_IDS", [
+      "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d",
+      "phygZDQZJZVHvJGYPGoKPYUtXw7mstSYtTtcuh8LJcC",
+    ]),
+    packOpeningAuthorityAddresses: csvEnv("PACK_OPENING_AUTHORITY_ADDRESSES"),
+    packOpeningCollectionAddresses: csvEnv("PACK_OPENING_COLLECTION_ADDRESSES"),
+    packOpeningKeywords: csvEnv("PACK_OPENING_KEYWORDS", ["pack", "open", "opened", "reveal", "claim", "redeem", "redeemed"]),
   };
 }
 
