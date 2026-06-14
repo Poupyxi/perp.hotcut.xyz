@@ -2,6 +2,7 @@ import type { RwaNftMarketEvent, RwaNftMarketEventType } from "@/types/rwaNftMar
 
 type ParseOptions = {
   fallbackMint?: string | null;
+  fallbackOwner?: string | null;
 };
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -158,6 +159,70 @@ function findTransferSaleFallback(tx: Record<string, unknown>, fallbackMint?: st
   };
 }
 
+function isMarketplaceSource(source: string | null) {
+  const value = String(source ?? "").toLowerCase();
+  return ["magic_eden", "magic eden", "tensor", "hyperspace", "solanart"].some((pattern) => value.includes(pattern));
+}
+
+function accountAddresses(tx: Record<string, unknown>) {
+  return (Array.isArray(tx.accountData) ? tx.accountData : [])
+    .map((row) => asString(asRecord(row).account))
+    .filter((value): value is string => Boolean(value));
+}
+
+function findMarketplaceUnknownSaleFallback(tx: Record<string, unknown>, options: ParseOptions = {}): RwaNftMarketEvent | null {
+  const mint = options.fallbackMint ? asString(options.fallbackMint) : nftMintFromTx(tx, options.fallbackMint);
+  const owner = asString(options.fallbackOwner);
+  const marketplace = firstString(tx.source, tx.marketplace);
+  if (!mint || !marketplace || !isMarketplaceSource(marketplace)) return null;
+
+  const typeText = String(tx.type ?? tx.transactionType ?? "").toUpperCase();
+  if (typeText && typeText !== "UNKNOWN") return null;
+
+  const accounts = accountAddresses(tx);
+  if (!accounts.includes(mint)) return null;
+  if (owner && !accounts.includes(owner)) return null;
+
+  const nativeTransfers = recordArray(tx.nativeTransfers)
+    .map((transfer) => ({
+      from: asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress),
+      to: asString(transfer.toUserAccount) ?? asString(transfer.toAddress),
+      amountLamports: numberFromUnknown(transfer.amount),
+    }))
+    .filter((transfer) => transfer.from && transfer.to && transfer.amountLamports && transfer.amountLamports > 100_000)
+    .sort((a, b) => (b.amountLamports ?? 0) - (a.amountLamports ?? 0));
+
+  const primaryPayment = nativeTransfers[0];
+  if (!primaryPayment || !primaryPayment.amountLamports) return null;
+
+  const priceSol = primaryPayment.amountLamports / 1_000_000_000;
+  return {
+    mint,
+    category: null,
+    eventType: "SALE",
+    priceSol,
+    priceUsd: null,
+    paymentMint: null,
+    paymentSymbol: "SOL",
+    paymentAmount: priceSol,
+    marketplace,
+    txSignature: firstString(tx.signature, tx.transactionSignature, tx.txHash),
+    buyer: null,
+    seller: null,
+    owner,
+    eventAt: timestampFromTx(tx),
+    source: "helius_enhanced_tx",
+    rawPayload: withParserMetadata(tx, {
+      fallbackVerified: true,
+      fallbackReason: "Helius type was UNKNOWN and marketplace source plus payment flow confirmed a sale",
+      paymentMint: null,
+      paymentSymbol: "SOL",
+      paymentAmount: priceSol,
+      inferredMarketplaceSale: true,
+    }),
+  };
+}
+
 function nftMintFromTx(tx: Record<string, unknown>, fallbackMint?: string | null) {
   const nftEvent = asRecord(tx.nft);
   const events = asRecord(tx.events);
@@ -284,7 +349,12 @@ export function parseHeliusEnhancedTransaction(txPayload: unknown, options: Pars
     const eventType = detectEventType(tx);
     if (!eventType) {
       const transferSale = findTransferSaleFallback(tx, options.fallbackMint);
-      if (transferSale) events.push(transferSale);
+      if (transferSale) {
+        events.push(transferSale);
+        continue;
+      }
+      const marketplaceSale = findMarketplaceUnknownSaleFallback(tx, options);
+      if (marketplaceSale) events.push(marketplaceSale);
       continue;
     }
 

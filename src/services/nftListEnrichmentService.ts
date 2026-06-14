@@ -332,7 +332,7 @@ function isMarketplaceSource(tx: Record<string, unknown>) {
 
 function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null) {
   const config = readNftScannerConfig();
-  const saleEvents = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint }).filter((event) => event.eventType === "SALE");
+  const saleEvents = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint, fallbackOwner: owner }).filter((event) => event.eventType === "SALE");
   if (saleEvents.length > 0) return { matched: false, reason: "verified sale already detected for this NFT", nftReceiver: null, matchedSignals: [], matchedAccounts: [] };
 
   const text = textFromTx(tx);
@@ -443,7 +443,7 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
     nftTransfers: string[];
   };
 } {
-  const sales = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint }).filter((event) => event.eventType === "SALE");
+  const sales = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint, fallbackOwner: owner }).filter((event) => event.eventType === "SALE");
   const sale = sales[0] ?? null;
   const packEvidence = detectPackOpeningEvidence(tx, mint, owner, collectionAddress);
   const instructionProgramList = instructionPrograms(tx);
