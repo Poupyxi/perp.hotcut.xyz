@@ -423,6 +423,29 @@ function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, ow
   };
 }
 
+function inferCoreTransferReceiver(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null) {
+  const feePayer = asString(tx.feePayer);
+  const instructions = Array.isArray(tx.instructions) ? tx.instructions.map(asRecord) : [];
+  const coreInstruction = instructions.find((instruction) => {
+    const programId = asString(instruction.programId) ?? asString(instruction.program);
+    if (programId !== "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d") return false;
+    const accounts = Array.isArray(instruction.accounts) ? instruction.accounts.map((value) => String(value)) : [];
+    return accounts.includes(mint);
+  });
+  if (!coreInstruction) return null;
+
+  const accounts = Array.isArray(coreInstruction.accounts) ? coreInstruction.accounts.map((value) => String(value)) : [];
+  if (collectionAddress && !accounts.includes(collectionAddress)) return null;
+  if (!owner || !accounts.includes(owner)) return null;
+  if (!feePayer || feePayer === owner || !accounts.includes(feePayer)) return null;
+
+  return {
+    sender: feePayer,
+    receiver: owner,
+    accounts,
+  };
+}
+
 function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null): {
   type: NFTLastActivityType;
   state: NFTMarketStatus;
@@ -472,6 +495,17 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: ownerIsBuyer ? "owned" : "sold",
       sale,
       reason: "verified sale detected by Helius enhanced transaction parser",
+      debug: commonDebug,
+    };
+  }
+
+  const inferredCoreTransfer = inferCoreTransferReceiver(tx, mint, owner, collectionAddress);
+  if (inferredCoreTransfer) {
+    return {
+      type: "transferred",
+      state: owner ? "owned" : "transferred_out",
+      sale: null,
+      reason: `core transfer inferred from CoREEN instruction accounts: ${inferredCoreTransfer.sender} -> ${inferredCoreTransfer.receiver}`,
       debug: commonDebug,
     };
   }
