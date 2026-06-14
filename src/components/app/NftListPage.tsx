@@ -323,7 +323,12 @@ export function NftListPage() {
         setNfts(payload.nfts ?? []);
         setTotal(payload.total ?? 0);
 
-        if (isMintSearch && (payload.total ?? 0) === 0 && page === 1) {
+        if (isMintSearch && page === 1) {
+          console.log("[NFT LIST][SEARCH] forcing on-demand refresh", {
+            searchedMint,
+            localMatchesCount: payload.total ?? 0,
+            apiCalled: true,
+          });
           setMintLookupLoading(true);
           setMintLookupNote("Fetching NFT from Helius...");
           const mintResponse = await fetch(`/api/nfts/${encodeURIComponent(searchedMint)}?refresh=true`, {
@@ -333,10 +338,13 @@ export function NftListPage() {
 
           const mintPayload = await mintResponse.json() as { nft?: Record<string, unknown>; error?: string };
           if (mintResponse.ok && mintPayload.nft) {
-            setNfts([nftFromLookupResponse(mintPayload.nft, searchedMint)]);
+            const refreshed = nftFromLookupResponse(mintPayload.nft, searchedMint);
+            console.log("[NFT LIST][SEARCH] API result received", { searchedMint, currentState: refreshed.currentState, isListed: refreshed.isListed });
+            setNfts([refreshed]);
             setTotal(1);
             setMintLookupNote(null);
           } else {
+            console.log("[NFT LIST][SEARCH] API refresh failed", { searchedMint, error: mintPayload.error ?? "NFT not found or provider unavailable" });
             setNfts([]);
             setTotal(0);
             setMintLookupNote(mintPayload.error ?? "NFT not found or provider unavailable");

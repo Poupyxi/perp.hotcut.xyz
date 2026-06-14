@@ -1064,18 +1064,7 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
   }
 
   if (row && forceRefreshRequested && cooldownActive) {
-    console.log("[NFT LOOKUP] Helius skipped: refresh cooldown active");
-    return {
-      nft: rowToNftDto(row),
-      cacheHit: true,
-      heliusCalled: false,
-      dbUpdated: false,
-      providerUsed: asString(row.source_provider) ?? asString(row.latest_provider) ?? null,
-      reason: "refresh cooldown active",
-      verifiedSalesDetected: 0,
-      verifiedSalesStored: 0,
-      error: null,
-    };
+    console.log("[NFT LOOKUP] Helius cooldown bypassed: force refresh requested");
   }
 
   if (!shouldRefresh && row) {
