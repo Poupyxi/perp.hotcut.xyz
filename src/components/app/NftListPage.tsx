@@ -187,6 +187,12 @@ function statusLabel(value: string | null | undefined) {
   return STATUS_OPTIONS.find(([status]) => status === value)?.[1] ?? "Unknown";
 }
 
+function currentStateValue(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed">) {
+  if (nft.currentState && nft.currentState !== "unknown") return nft.currentState;
+  if (nft.currentStatus && nft.currentStatus !== "unknown") return nft.currentStatus;
+  return nft.isListed ? "listed" : "unknown";
+}
+
 function statusClass(value: string | null | undefined) {
   if (value === "listed") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
   if (value === "owned") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
@@ -352,7 +358,7 @@ export function NftListPage() {
 
   const visibleCards = nfts.filter((nft) => nft.assetType === "card").length;
   const otherAssets = nfts.filter((nft) => nft.assetType !== "card").length;
-  const listedAssets = nfts.filter((nft) => nft.isListed).length;
+  const listedAssets = nfts.filter((nft) => currentStateValue(nft) === "listed" || nft.isListed).length;
 
   return (
     <div className="space-y-6">
@@ -467,9 +473,13 @@ export function NftListPage() {
                 </td>
               </tr>
             ) : nfts.map((nft) => {
+              const currentState = currentStateValue(nft);
+              const isActivelyListed = currentState === "listed" || nft.isListed === true;
               const latestMarketPrice = fmtPrice(nft.latestMarketPriceSol, nft.latestMarketPriceUsd);
               const lastSale = fmtPrice(nft.lastSalePriceSol, nft.lastSalePriceUsd);
-              const activeListing = fmtPrice(nft.latestListingPriceSol, nft.latestListingPriceUsd);
+              const activeListing = isActivelyListed
+                ? fmtPrice(nft.latestListingPriceSol, nft.latestListingPriceUsd)
+                : null;
               return (
                 
                 <tr key={nft.mint} className="hover:bg-surface-raised/40 transition">
@@ -492,8 +502,8 @@ export function NftListPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-center">
-                    <span className={`rounded border px-2 py-1 text-xs ${statusClass(nft.currentState ?? nft.currentStatus)}`}>
-                      {statusLabel(nft.currentState ?? nft.currentStatus)}
+                    <span className={`rounded border px-2 py-1 text-xs ${statusClass(currentState)}`}>
+                      {statusLabel(currentState)}
                     </span>
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
@@ -532,7 +542,7 @@ export function NftListPage() {
                     )}
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
-                    {activeListing ? (
+                    {isActivelyListed && activeListing ? (
                       <div>
                         <div className="font-mono">{activeListing}</div>
                         <div>{nft.listingMarketplace ?? "Listing source unknown"}</div>
