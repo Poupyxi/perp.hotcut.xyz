@@ -134,7 +134,7 @@ function nftFromLookupResponse(nft: Record<string, unknown>, fallbackMint: strin
     assetType: typeof nft.assetType === "string" ? nft.assetType : "unknown",
     publicGroup: typeof nft.publicGroup === "string" ? nft.publicGroup : "other",
     isStaging: false,
-    isListed: false,
+    isListed: nft.isListed === true || nft.currentState === "listed",
     currentState: typeof nft.currentState === "string" ? nft.currentState : "unknown",
     currentStatus: typeof nft.currentStatus === "string" ? nft.currentStatus : typeof nft.currentState === "string" ? nft.currentState : "unknown",
     lastActivityType: typeof nft.lastActivityType === "string" ? nft.lastActivityType : "unknown",

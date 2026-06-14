@@ -1,6 +1,7 @@
 import type { NFTLastActivityType, NFTMarketStatus, NFTMetadataStatus, ProviderScanStatus, RwaNftMarketEvent } from "@/types/rwaNftMarket";
 import { parseHeliusEnhancedTransaction } from "./heliusEnhancedTransactionParser";
 import { getAssetByMint, normalizeHeliusAsset } from "./heliusNftService";
+import { lookupActiveListingByMint, type ActiveMintListingLookupResult } from "./nftMarketplaceListingService";
 import { detectCollectibleAssetType, publicGroupForAssetType } from "./nftAssetTypeService";
 import { detectRwaNftCategory, isAllowedRwaNftCategory } from "./nftCategoryService";
 import { getNftDb, shouldStoreRawHeliusJson, sqliteBool, stringifyJson } from "./nftSqliteDb";
@@ -143,6 +144,7 @@ function rowToNftDto(row: SqlRow) {
     ownerWallet: asString(row.owner),
     source: asString(row.source_collection),
     provider: asString(row.source_provider) ?? asString(row.latest_provider),
+    isListed: Boolean(row.is_listed),
     currentState: asString(row.current_state) ?? asString(row.current_status) ?? "unknown",
     lastActivityType: asString(row.last_activity_type) ?? "unknown",
     lastActivityAt: asString(row.last_activity_at),
@@ -799,6 +801,150 @@ function mergeEnrichmentPreview(row: SqlRow | undefined, normalized: ReturnType<
   return next as SqlRow;
 }
 
+type DerivedListingMarketState = {
+  currentState: NFTMarketStatus;
+  lastActivityType: NFTLastActivityType;
+  lastActivityAt: string | null;
+  lastActivityProvider: string;
+  latestProvider: string;
+  latestMarketplace: string | null;
+  latestMarketPriceSol: number | null;
+  latestMarketPriceUsd: number | null;
+  isListed: boolean;
+  listedPriceSol: number | null;
+  listedPriceUsd: number | null;
+  listingMarketplace: string | null;
+  listingUpdatedAt: string | null;
+  rawMarketStateJson: string;
+};
+
+function deriveListingMarketState(input: {
+  row: SqlRow;
+  activity: ReturnType<typeof detectActivityFromTx>;
+  listingResult: ActiveMintListingLookupResult | null;
+  lastActivityAt: string | null;
+}) : DerivedListingMarketState {
+  const listing = input.listingResult?.listing ?? null;
+  const hasListing = Boolean(input.listingResult?.found && listing);
+  const listingAt = hasListing ? (listing?.listedAt ?? null) : null;
+  const listingIsNewer = hasListing && Boolean(listingAt) && ((parseDate(listingAt) ?? 0) >= (parseDate(input.lastActivityAt) ?? 0));
+  const currentState = hasListing
+    ? "listed"
+    : input.activity.state === "listed"
+      ? "owned"
+      : input.activity.state;
+  const lastActivityType = hasListing && listingIsNewer ? "listed" : input.activity.type;
+  const lastActivityAt = hasListing && listingIsNewer ? (listingAt ?? input.lastActivityAt) : input.lastActivityAt;
+  const lastActivityProvider = hasListing && listingIsNewer ? listing!.providerId : "helius";
+  const latestProvider = input.activity.sale?.txSignature ? "helius" : hasListing ? listing!.providerId : "helius";
+  const latestMarketplace = input.activity.sale?.marketplace ?? (hasListing ? listing!.marketplace : asString(input.row.latest_marketplace));
+  const latestMarketPriceSol =
+    input.activity.sale?.priceSol
+    ?? (typeof input.row.latest_market_price_sol === "number" ? input.row.latest_market_price_sol : null)
+    ?? (hasListing ? listing!.priceSol : null);
+  const latestMarketPriceUsd =
+    input.activity.sale?.priceUsd
+    ?? (typeof input.row.latest_market_price_usd === "number" ? input.row.latest_market_price_usd : null)
+    ?? (hasListing ? listing!.priceUsd : null);
+
+  return {
+    currentState,
+    lastActivityType,
+    lastActivityAt,
+    lastActivityProvider,
+    latestProvider,
+    latestMarketplace,
+    latestMarketPriceSol,
+    latestMarketPriceUsd,
+    isListed: hasListing,
+    listedPriceSol: hasListing ? listing!.priceSol : null,
+    listedPriceUsd: hasListing ? listing!.priceUsd : null,
+    listingMarketplace: hasListing ? listing!.marketplace : null,
+    listingUpdatedAt: hasListing ? listingAt : null,
+    rawMarketStateJson: stringifyJson({
+      provider: latestProvider,
+      activeListing: hasListing ? {
+        providerId: listing!.providerId,
+        marketplace: listing!.marketplace,
+        priceSol: listing!.priceSol,
+        priceUsd: listing!.priceUsd,
+        listedAt: listingAt,
+      } : null,
+      lastActivityType,
+      lastActivityAt,
+      latestMarketPricePriority: input.activity.sale?.txSignature ? "verified_sale" : hasListing ? "active_listing" : "unknown",
+      listingProvidersChecked: input.listingResult?.providersChecked ?? [],
+    }),
+  };
+}
+
+function applyListingMarketStateToPreviewRow(row: SqlRow, marketState: DerivedListingMarketState) {
+  return {
+    ...row,
+    is_listed: marketState.isListed,
+    listed_price_sol: marketState.listedPriceSol,
+    listed_price_usd: marketState.listedPriceUsd,
+    listing_marketplace: marketState.listingMarketplace,
+    listing_updated_at: marketState.listingUpdatedAt,
+    current_state: marketState.currentState,
+    current_status: marketState.currentState,
+    last_activity_type: marketState.lastActivityType,
+    last_activity_at: marketState.lastActivityAt,
+    last_activity_provider: marketState.lastActivityProvider,
+    latest_provider: marketState.latestProvider,
+    latest_marketplace: marketState.latestMarketplace,
+    latest_market_price_sol: marketState.latestMarketPriceSol,
+    latest_market_price_usd: marketState.latestMarketPriceUsd,
+    raw_market_state_json: marketState.rawMarketStateJson,
+    market_updated_at: nowIso(),
+    updated_at: nowIso(),
+  } as SqlRow;
+}
+
+function persistListingMarketState(mint: string, marketState: DerivedListingMarketState) {
+  const timestamp = nowIso();
+  getNftDb().prepare(`
+    UPDATE nft_assets SET
+      is_listed = ?,
+      listed_price_sol = ?,
+      listed_price_usd = ?,
+      listing_marketplace = ?,
+      listing_updated_at = ?,
+      current_state = ?,
+      current_status = ?,
+      last_activity_type = ?,
+      last_activity_at = ?,
+      last_activity_provider = ?,
+      latest_provider = ?,
+      latest_marketplace = ?,
+      latest_market_price_sol = ?,
+      latest_market_price_usd = ?,
+      raw_market_state_json = ?,
+      market_updated_at = ?,
+      updated_at = ?
+    WHERE mint = ?
+  `).run(
+    sqliteBool(marketState.isListed),
+    marketState.listedPriceSol,
+    marketState.listedPriceUsd,
+    marketState.listingMarketplace,
+    marketState.listingUpdatedAt,
+    marketState.currentState,
+    marketState.currentState,
+    marketState.lastActivityType,
+    marketState.lastActivityAt,
+    marketState.lastActivityProvider,
+    marketState.latestProvider,
+    marketState.latestMarketplace,
+    marketState.latestMarketPriceSol,
+    marketState.latestMarketPriceUsd,
+    marketState.rawMarketStateJson,
+    timestamp,
+    timestamp,
+    mint,
+  );
+}
+
 export async function refreshNftByMint(options: RefreshNftByMintOptions): Promise<RefreshNftByMintResult> {
   const mint = options.mint.trim();
   if (!mint) {
@@ -930,18 +1076,44 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
       verifiedSalesDetected += 1;
     }
 
+    console.log(`[NFT LOOKUP] active listing refresh started mint=${mint}`);
+    let listingResult: ActiveMintListingLookupResult | null = null;
+    try {
+      listingResult = await lookupActiveListingByMint(mint);
+      console.log(`[NFT LOOKUP] providers checked=${listingResult.providersChecked.length ? listingResult.providersChecked.map((check) => `${check.providerId}:${check.status}`).join(", ") : "none"}`);
+      console.log(`[NFT LOOKUP] listing found=${listingResult.found}`);
+      if (listingResult.listing) {
+        const price = listingResult.listing.priceSol != null
+          ? `${listingResult.listing.priceSol} SOL`
+          : listingResult.listing.priceUsd != null
+            ? `${listingResult.listing.priceUsd} USD`
+            : "unknown";
+        console.log(`[NFT LOOKUP] listing price=${price}`);
+      }
+    } catch (error) {
+      console.log(`[NFT LOOKUP] listing lookup failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+
     const market = row?.market && asString(row.market) ? asString(row.market) : isAllowedRwaNftCategory(detectedCategory) ? detectedCategory : "unknown";
-    const previewRow = mergeEnrichmentPreview(row, normalized, activity, metadata, lastActivityAt, lastActivityTxHash);
+    const previewBaseRow = mergeEnrichmentPreview(row, normalized, activity, metadata, lastActivityAt, lastActivityTxHash);
+    const listingMarketState = deriveListingMarketState({
+      row: previewBaseRow,
+      activity,
+      listingResult,
+      lastActivityAt,
+    });
+    const previewRow = applyListingMarketStateToPreviewRow(previewBaseRow, listingMarketState);
+    console.log(`[NFT LOOKUP] final state=${listingMarketState.currentState}`);
 
     if (dryRun) {
-      console.log(`[NFT LOOKUP][DRY RUN] ${mint} state=${activity.state} lastActivity=${activity.type} tx=${lastActivityTxHash ?? "none"}`);
+      console.log(`[NFT LOOKUP][DRY RUN] ${mint} state=${listingMarketState.currentState} lastActivity=${listingMarketState.lastActivityType} tx=${lastActivityTxHash ?? "none"}`);
       return {
         nft: rowToNftDto(previewRow),
         cacheHit: false,
         heliusCalled: true,
         dbUpdated: false,
-        providerUsed: "helius",
-        reason: activity.reason,
+        providerUsed: listingMarketState.latestProvider,
+        reason: listingResult?.reason ?? activity.reason,
         verifiedSalesDetected,
         verifiedSalesStored: 0,
         error: null,
@@ -969,16 +1141,17 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
       sale: activity.sale,
       metadataStatus: metadata,
     });
+    persistListingMarketState(mint, listingMarketState);
     dbUpdated = true;
     const updatedRow = loadAssetByMint(mint) ?? previewRow;
-    console.log(`[NFT LOOKUP] DB updated=${dbUpdated} provider=helius`);
+    console.log(`[NFT LOOKUP] DB updated=${dbUpdated} provider=${listingMarketState.latestProvider}`);
     return {
       nft: rowToNftDto(updatedRow),
       cacheHit: false,
       heliusCalled: true,
       dbUpdated,
-      providerUsed: "helius",
-      reason: activity.reason,
+      providerUsed: listingMarketState.latestProvider,
+      reason: listingResult?.reason ?? activity.reason,
       verifiedSalesDetected,
       verifiedSalesStored,
       error: null,
