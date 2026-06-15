@@ -423,6 +423,33 @@ function detectPackOpeningEvidence(tx: Record<string, unknown>, mint: string, ow
   };
 }
 
+function inferMarketplacePurchase(tx: Record<string, unknown>, owner: string | null) {
+  const source = asString(tx.source)?.toLowerCase() ?? "";
+  const type = String(tx.type ?? tx.transactionType ?? "").toUpperCase();
+  if (!owner || type !== "DEPOSIT") return null;
+  if (!["magic_eden", "magic eden", "tensor", "hyperspace", "solanart"].some((pattern) => source.includes(pattern))) return null;
+
+  const nativeTransfers = (Array.isArray(tx.nativeTransfers) ? tx.nativeTransfers : [])
+    .map(asRecord)
+    .map((transfer) => ({
+      from: asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress),
+      to: asString(transfer.toUserAccount) ?? asString(transfer.toAddress),
+      amount: numberFromUnknown(transfer.amount),
+    }))
+    .filter((transfer) => transfer.from && transfer.to && transfer.amount && transfer.amount > 100_000)
+    .sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
+
+  const ownerOutgoing = nativeTransfers.find((transfer) => transfer.from === owner && transfer.to !== owner);
+  const sellerPayout = nativeTransfers.find((transfer) => transfer.from !== owner && transfer.to !== owner);
+  if (!ownerOutgoing || !sellerPayout || !sellerPayout.amount) return null;
+
+  return {
+    buyer: owner,
+    seller: sellerPayout.to,
+    priceSol: sellerPayout.amount / 1_000_000_000,
+  };
+}
+
 function inferCoreTransferReceiver(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null) {
   const feePayer = asString(tx.feePayer);
   const instructions = Array.isArray(tx.instructions) ? tx.instructions.map(asRecord) : [];
@@ -495,6 +522,17 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: ownerIsBuyer ? "owned" : "sold",
       sale,
       reason: "verified sale detected by Helius enhanced transaction parser",
+      debug: commonDebug,
+    };
+  }
+
+  const inferredPurchase = inferMarketplacePurchase(tx, owner);
+  if (inferredPurchase) {
+    return {
+      type: "bought",
+      state: "owned",
+      sale: null,
+      reason: `marketplace deposit inferred purchase at ${inferredPurchase.priceSol} SOL`,
       debug: commonDebug,
     };
   }

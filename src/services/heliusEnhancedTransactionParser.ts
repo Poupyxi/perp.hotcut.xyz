@@ -170,19 +170,7 @@ function accountAddresses(tx: Record<string, unknown>) {
     .filter((value): value is string => Boolean(value));
 }
 
-function findMarketplaceUnknownSaleFallback(tx: Record<string, unknown>, options: ParseOptions = {}): RwaNftMarketEvent | null {
-  const mint = options.fallbackMint ? asString(options.fallbackMint) : nftMintFromTx(tx, options.fallbackMint);
-  const owner = asString(options.fallbackOwner);
-  const marketplace = firstString(tx.source, tx.marketplace);
-  if (!mint || !marketplace || !isMarketplaceSource(marketplace)) return null;
-
-  const typeText = String(tx.type ?? tx.transactionType ?? "").toUpperCase();
-  if (typeText && typeText !== "UNKNOWN") return null;
-
-  const accounts = accountAddresses(tx);
-  if (!accounts.includes(mint)) return null;
-  if (owner && !accounts.includes(owner)) return null;
-
+function inferMarketplaceNativeSale(tx: Record<string, unknown>, owner: string | null) {
   const nativeTransfers = recordArray(tx.nativeTransfers)
     .map((transfer) => ({
       from: asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress),
@@ -192,32 +180,78 @@ function findMarketplaceUnknownSaleFallback(tx: Record<string, unknown>, options
     .filter((transfer) => transfer.from && transfer.to && transfer.amountLamports && transfer.amountLamports > 100_000)
     .sort((a, b) => (b.amountLamports ?? 0) - (a.amountLamports ?? 0));
 
-  const primaryPayment = nativeTransfers[0];
-  if (!primaryPayment || !primaryPayment.amountLamports) return null;
+  if (!nativeTransfers.length) return null;
 
-  const priceSol = primaryPayment.amountLamports / 1_000_000_000;
+  if (owner) {
+    const ownerOutgoings = nativeTransfers.filter((transfer) => transfer.from === owner && transfer.to !== owner);
+    const sellerPayouts = nativeTransfers.filter((transfer) => transfer.to !== owner && transfer.from !== owner);
+    const sellerPayout = sellerPayouts[0] ?? null;
+    const ownerOutgoing = ownerOutgoings[0] ?? null;
+
+    if (sellerPayout && ownerOutgoing && sellerPayout.amountLamports && ownerOutgoing.amountLamports) {
+      return {
+        buyer: owner,
+        seller: sellerPayout.to,
+        priceSol: sellerPayout.amountLamports / 1_000_000_000,
+      };
+    }
+
+    if (ownerOutgoing && ownerOutgoing.amountLamports) {
+      return {
+        buyer: owner,
+        seller: ownerOutgoing.to,
+        priceSol: ownerOutgoing.amountLamports / 1_000_000_000,
+      };
+    }
+  }
+
+  const largest = nativeTransfers[0];
+  if (!largest || !largest.amountLamports) return null;
+  return {
+    buyer: owner,
+    seller: largest.to,
+    priceSol: largest.amountLamports / 1_000_000_000,
+  };
+}
+
+function findMarketplaceUnknownSaleFallback(tx: Record<string, unknown>, options: ParseOptions = {}): RwaNftMarketEvent | null {
+  const mint = options.fallbackMint ? asString(options.fallbackMint) : nftMintFromTx(tx, options.fallbackMint);
+  const owner = asString(options.fallbackOwner);
+  const marketplace = firstString(tx.source, tx.marketplace);
+  if (!mint || !marketplace || !isMarketplaceSource(marketplace)) return null;
+
+  const typeText = String(tx.type ?? tx.transactionType ?? "").toUpperCase();
+  if (typeText && !["UNKNOWN", "DEPOSIT"].includes(typeText)) return null;
+
+  const accounts = accountAddresses(tx);
+  if (!accounts.includes(mint)) return null;
+  if (owner && !accounts.includes(owner)) return null;
+
+  const inferredSale = inferMarketplaceNativeSale(tx, owner);
+  if (!inferredSale || !inferredSale.priceSol) return null;
+
   return {
     mint,
     category: null,
     eventType: "SALE",
-    priceSol,
+    priceSol: inferredSale.priceSol,
     priceUsd: null,
     paymentMint: null,
     paymentSymbol: "SOL",
-    paymentAmount: priceSol,
+    paymentAmount: inferredSale.priceSol,
     marketplace,
     txSignature: firstString(tx.signature, tx.transactionSignature, tx.txHash),
-    buyer: null,
-    seller: null,
+    buyer: inferredSale.buyer,
+    seller: inferredSale.seller,
     owner,
     eventAt: timestampFromTx(tx),
     source: "helius_enhanced_tx",
     rawPayload: withParserMetadata(tx, {
       fallbackVerified: true,
-      fallbackReason: "Helius type was UNKNOWN and marketplace source plus payment flow confirmed a sale",
+      fallbackReason: "Helius type was marketplace settlement and payment flow confirmed a sale",
       paymentMint: null,
       paymentSymbol: "SOL",
-      paymentAmount: priceSol,
+      paymentAmount: inferredSale.priceSol,
       inferredMarketplaceSale: true,
     }),
   };

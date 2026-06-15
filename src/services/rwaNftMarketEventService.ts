@@ -76,6 +76,62 @@ function loadAsset(mint: string): AssetForEvent | null {
   return row ? row as AssetForEvent : null;
 }
 
+async function repairExistingMarketEvent(event: RwaNftMarketEvent): Promise<boolean> {
+  if (!event.txSignature) return false;
+  const existing = getNftDb().prepare(
+    "SELECT id, price_sol, price_usd, payment_mint, payment_symbol, payment_amount, buyer, seller, owner, marketplace, source, event_at FROM rwa_nft_events WHERE tx_signature = ? AND event_type = ? LIMIT 1"
+  ).get(event.txSignature, event.eventType) as Record<string, unknown> | undefined;
+  if (!existing) return false;
+
+  const changed = (asNumber(existing.price_sol) ?? null) != (event.priceSol ?? null)
+    || (asNumber(existing.price_usd) ?? null) != (event.priceUsd ?? null)
+    || (asString(existing.payment_mint) ?? null) != (event.paymentMint ?? null)
+    || (asString(existing.payment_symbol) ?? null) != (event.paymentSymbol ?? null)
+    || (asNumber(existing.payment_amount) ?? null) != (event.paymentAmount ?? null)
+    || (asString(existing.buyer) ?? null) != (event.buyer ?? null)
+    || (asString(existing.seller) ?? null) != (event.seller ?? null)
+    || (asString(existing.owner) ?? null) != (event.owner ?? null)
+    || (asString(existing.marketplace) ?? null) != (event.marketplace ?? null)
+    || (asString(existing.source) ?? null) != (event.source ?? null)
+    || (asString(existing.event_at) ?? null) != (event.eventAt ?? null);
+
+  if (!changed) return false;
+
+  getNftDb().prepare(`
+    UPDATE rwa_nft_events SET
+      price_sol = ?,
+      price_usd = ?,
+      payment_mint = ?,
+      payment_symbol = ?,
+      payment_amount = ?,
+      marketplace = ?,
+      buyer = ?,
+      seller = ?,
+      owner = ?,
+      event_at = ?,
+      source = ?,
+      raw_payload_json = ?
+    WHERE id = ?
+  `).run(
+    event.priceSol,
+    event.priceUsd,
+    event.paymentMint ?? null,
+    event.paymentSymbol ?? null,
+    event.paymentAmount ?? null,
+    event.marketplace,
+    event.buyer,
+    event.seller,
+    event.owner,
+    event.eventAt,
+    event.source,
+    stringifyJson(event.rawPayload),
+    String(existing.id),
+  );
+
+  await updateNftAssetFromMarketEvent(event);
+  return true;
+}
+
 export async function dedupeMarketEvent(event: RwaNftMarketEvent): Promise<boolean> {
   const database = getNftDb();
   if (event.txSignature) {
@@ -204,6 +260,11 @@ export async function saveRwaNftMarketEvent(event: RwaNftMarketEvent, options: {
   if (!isAllowedRwaNftCategory(category)) return { saved: false, reason: "category_not_allowed" };
   if (asset.is_staging && !options.includeStaging) return { saved: false, reason: "staging_hidden" };
   if (await dedupeMarketEvent(event)) {
+    const repaired = await repairExistingMarketEvent({ ...event, category });
+    if (repaired) {
+      console.log("[RWA MARKET] Existing event repaired from fresh parser data");
+      return { saved: true, reason: "repaired_duplicate" };
+    }
     console.log("[RWA MARKET] Duplicate event skipped");
     return { saved: false, reason: "duplicate" };
   }

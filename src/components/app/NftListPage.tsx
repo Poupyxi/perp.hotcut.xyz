@@ -187,21 +187,11 @@ function ownerPrefix(value: string | null | undefined) {
   return value ? value.slice(0, 4) : null;
 }
 
-function isOlderThanOneWeek(value: string | null | undefined) {
-  if (!value) return false;
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return false;
-  return Date.now() - parsed >= 7 * 24 * 60 * 60 * 1000;
-}
-
-function displayCurrentStatus(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed" | "lastActivityAt" | "owner">) {
+function displayCurrentStatus(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed" | "owner">) {
   const state = currentStateValue(nft);
   if (state === "owned") {
-    if (isOlderThanOneWeek(nft.lastActivityAt)) {
-      const prefix = ownerPrefix(nft.owner);
-      return prefix ? `Hold ${prefix}` : "Hold";
-    }
-    return "Buy";
+    const prefix = ownerPrefix(nft.owner);
+    return prefix ? `Wallet ${prefix}` : "Wallet";
   }
   if (state === "listed") return "Listed";
   if (state === "transferred_out") return "Transferred Out";
@@ -557,7 +547,7 @@ export function NftListPage() {
                   </td>
                   <td className="px-5 py-3 text-center">
                     <span className={`rounded border px-2 py-1 text-xs ${statusClass(currentState)}`}>
-                      {displayCurrentStatus({ currentState: nft.currentState, currentStatus: nft.currentStatus, isListed: nft.isListed, lastActivityAt: nft.lastActivityAt, owner: nft.owner })}
+                      {displayCurrentStatus({ currentState: nft.currentState, currentStatus: nft.currentStatus, isListed: nft.isListed, owner: nft.owner })}
                     </span>
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
