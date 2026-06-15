@@ -35,12 +35,18 @@ function booleanArg(name: string) {
   return null;
 }
 
+function laneArg() {
+  const value = argValue("lane");
+  return value === "hot" || value === "cold" || value === "all" ? value : null;
+}
+
 async function main() {
   loadLocalEnvFile();
   const forceDryRun = process.argv.includes("--dry-run");
   const result = await enrichNFTList({
     mint: argValue("mint"),
     limit: numberArg("limit"),
+    lane: laneArg(),
     dryRun: forceDryRun ? true : booleanArg("dryRun"),
   });
 

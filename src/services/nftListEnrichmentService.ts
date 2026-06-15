@@ -16,6 +16,7 @@ export type EnrichNFTListOptions = {
   mint?: string | null;
   limit?: number | null;
   dryRun?: boolean | null;
+  lane?: "all" | "hot" | "cold" | null;
 };
 
 type EnrichedNftChange = {
@@ -93,12 +94,21 @@ function isMissingText(value: unknown) {
 
 function selectAssets(options: EnrichNFTListOptions, limit: number) {
   const params: unknown[] = [];
+  const where: string[] = [];
   let sql = "SELECT * FROM nft_assets";
   if (options.mint) {
-    sql += " WHERE mint = ?";
+    where.push("mint = ?");
     params.push(options.mint);
+  } else if (options.lane === "hot") {
+    where.push("(last_sale_at IS NOT NULL OR latest_market_price_sol IS NOT NULL OR latest_market_price_usd IS NOT NULL OR listed_price_sol IS NOT NULL OR listed_price_usd IS NOT NULL OR COALESCE(last_activity_type, 'unknown') != 'unknown')");
+  } else if (options.lane === "cold") {
+    where.push("(last_sale_at IS NULL AND latest_market_price_sol IS NULL AND latest_market_price_usd IS NULL AND listed_price_sol IS NULL AND listed_price_usd IS NULL AND COALESCE(last_activity_type, 'unknown') = 'unknown' AND last_activity_at IS NULL)");
   }
-  sql += " ORDER BY CASE WHEN last_sale_at IS NOT NULL OR latest_market_price_sol IS NOT NULL OR latest_market_price_usd IS NOT NULL OR listed_price_sol IS NOT NULL OR listed_price_usd IS NOT NULL THEN 0 WHEN COALESCE(last_activity_type, 'unknown') != 'unknown' OR last_activity_at IS NOT NULL THEN 1 WHEN metadata_status IS NULL OR metadata_status != 'complete' OR image IS NULL OR image = '' OR owner IS NULL OR owner = '' THEN 2 ELSE 3 END ASC, last_checked_at IS NULL DESC, last_checked_at ASC, updated_at DESC";
+  if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+  const orderBy = options.lane === "cold"
+    ? "last_checked_at IS NULL DESC, last_checked_at ASC, updated_at ASC"
+    : "CASE WHEN last_sale_at IS NOT NULL OR latest_market_price_sol IS NOT NULL OR latest_market_price_usd IS NOT NULL OR listed_price_sol IS NOT NULL OR listed_price_usd IS NOT NULL THEN 0 WHEN COALESCE(last_activity_type, 'unknown') != 'unknown' THEN 1 WHEN metadata_status IS NULL OR metadata_status != 'complete' OR image IS NULL OR image = '' OR owner IS NULL OR owner = '' THEN 2 ELSE 3 END ASC, last_checked_at IS NULL DESC, last_checked_at ASC, updated_at DESC";
+  sql += ` ORDER BY ${orderBy}`;
   if (!options.mint) {
     sql += " LIMIT ?";
     params.push(Math.max(Math.trunc(options.limit ?? limit), 1));
@@ -175,6 +185,42 @@ function rowNeedsRefresh(row: SqlRow | undefined, ttlSeconds: number) {
   const stale = !checkedAt || ageMs > ttlMs;
   const incomplete = rowMetadataStatus(row) !== "complete" || !asString(row.owner) || !asString(row.image);
   return stale || incomplete;
+}
+
+function shouldFetchDetailedHistory(input: {
+  row: SqlRow | undefined;
+  lane: "all" | "hot" | "cold" | null | undefined;
+  owner: string | null;
+  focusMint: boolean;
+}) {
+  if (!input.row || input.focusMint) return true;
+
+  const ownerChanged = Boolean(input.owner && asString(input.row.owner) && asString(input.row.owner) !== input.owner);
+  const metadataIncomplete = rowMetadataStatus(input.row) !== "complete" || !asString(input.row.owner) || !asString(input.row.image);
+  const storedActivityType = asString(input.row.last_activity_type) ?? "unknown";
+  const hasMarketData = Boolean(
+    asString(input.row.last_sale_at)
+    || numberFromUnknown(input.row.last_sale_price_sol) != null
+    || numberFromUnknown(input.row.last_sale_price_usd) != null
+    || numberFromUnknown(input.row.latest_market_price_sol) != null
+    || numberFromUnknown(input.row.latest_market_price_usd) != null
+    || numberFromUnknown(input.row.listed_price_sol) != null
+    || numberFromUnknown(input.row.listed_price_usd) != null
+  );
+  const checkedAtMs = parseDate(input.row.last_checked_at) ?? 0;
+  const detailedHistoryAgeMs = checkedAtMs ? Date.now() - checkedAtMs : Number.POSITIVE_INFINITY;
+
+  if (input.lane === "cold") {
+    return metadataIncomplete || ownerChanged || !checkedAtMs;
+  }
+
+  if (input.lane === "hot") {
+    if (ownerChanged || metadataIncomplete) return true;
+    if (storedActivityType === "unknown" || !hasMarketData) return true;
+    return detailedHistoryAgeMs > 6 * 60 * 60 * 1000;
+  }
+
+  return true;
 }
 
 function refreshCooldownActive(row: SqlRow | undefined, cooldownSeconds: number) {
@@ -1457,7 +1503,7 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
   let verifiedSalesDetected = 0;
   let verifiedSalesStored = 0;
 
-  console.log(`[NFT LIST ENRICH] Starting dryRun=${dryRun} batchSize=${config.nftListEnrichBatchSize}`);
+  console.log(`[NFT LIST ENRICH] Starting dryRun=${dryRun} batchSize=${config.nftListEnrichBatchSize} lane=${selectionOptions.lane ?? "all"}`);
   if (focusMint) console.log(`[NFT LIST ENRICH] Focus mode enabled: ${focusMint}`);
 
   for (const row of rows) {
@@ -1467,9 +1513,19 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       const rawAsset = await withRetries(config.nftListEnrichMaxRetries, () => getAssetByMint(mint));
       const normalized = normalizeHeliusAsset(rawAsset, asString(row.market) ?? asString(row.category) ?? "unknown");
       const metadata = metadataStatus({ name: normalized.name, image: normalized.image, owner: normalized.owner });
-      const signatures = await withRetries(config.nftListEnrichMaxRetries, () => recentSignaturesForMint(mint, 8));
+      const fetchDetailedHistory = shouldFetchDetailedHistory({
+        row,
+        lane: selectionOptions.lane,
+        owner: normalized.owner,
+        focusMint: focusMint === mint,
+      });
+      const signatures = fetchDetailedHistory
+        ? await withRetries(config.nftListEnrichMaxRetries, () => recentSignaturesForMint(mint, 8))
+        : [];
       const signatureValues = signatures.map((signature) => asString(signature.signature)).filter((signature): signature is string => Boolean(signature));
-      const txs = await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)));
+      const txs = fetchDetailedHistory
+        ? await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)))
+        : [];
       const latestTx = txs[0] ?? null;
       const activity = latestTx
         ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection, signatureValues.length)
@@ -1477,7 +1533,7 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
             type: "unknown" as const,
             state: normalized.owner ? "owned" as const : "unknown" as const,
             sale: null,
-            reason: "no recent transaction found",
+            reason: fetchDetailedHistory ? "no recent transaction found" : `skipped detailed transaction refresh for ${selectionOptions.lane ?? "all"} lane`,
             debug: {
               txHash: null,
               detectedType: null,
