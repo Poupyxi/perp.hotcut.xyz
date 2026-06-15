@@ -293,7 +293,7 @@ export function NftListPage() {
   const [sourceCollection, setSourceCollection] = useState("");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState("name_asc");
+  const [sort, setSort] = useState("checked_desc");
   const [includeOther, setIncludeOther] = useState(false);
   const [includeUnknown, setIncludeUnknown] = useState(false);
   const [missingImage, setMissingImage] = useState(false);
@@ -451,10 +451,10 @@ export function NftListPage() {
           </select>
 
           <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+            <option value="checked_desc">Recently checked</option>
+            <option value="updated_desc">Recently updated</option>
             <option value="name_asc">Name A to Z</option>
             <option value="name_desc">Name Z to A</option>
-            <option value="updated_desc">Recently updated</option>
-            <option value="checked_desc">Recently checked</option>
             <option value="market_price_desc">Market price high to low</option>
             <option value="market_price_asc">Market price low to high</option>
             <option value="category_asc">Category A to Z</option>
