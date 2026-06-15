@@ -183,8 +183,32 @@ function fmtPrice(sol: number | null, usd: number | null) {
   return fmtSol(sol) ?? fmtUsd(usd) ?? null;
 }
 
-function statusLabel(value: string | null | undefined) {
-  return STATUS_OPTIONS.find(([status]) => status === value)?.[1] ?? "Unknown";
+function ownerPrefix(value: string | null | undefined) {
+  return value ? value.slice(0, 4) : null;
+}
+
+function isOlderThanOneWeek(value: string | null | undefined) {
+  if (!value) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  return Date.now() - parsed >= 7 * 24 * 60 * 60 * 1000;
+}
+
+function displayCurrentStatus(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed" | "lastActivityAt" | "owner">) {
+  const state = currentStateValue(nft);
+  if (state === "owned") {
+    if (isOlderThanOneWeek(nft.lastActivityAt)) {
+      const prefix = ownerPrefix(nft.owner);
+      return prefix ? `Hold ${prefix}` : "Hold";
+    }
+    return "Buy";
+  }
+  if (state === "listed") return "Listed";
+  if (state === "transferred_out") return "Transferred Out";
+  if (state === "sold") return "Sold";
+  if (state === "stale") return "Needs Review";
+  if (state === "unlisted") return "Not Listed";
+  return "Unknown";
 }
 
 function currentStateValue(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed">) {
@@ -212,7 +236,14 @@ function statusClass(value: string | null | undefined) {
 }
 
 function activityLabel(value: string | null | undefined) {
-  return ACTIVITY_OPTIONS.find(([activity]) => activity === value)?.[1] ?? "Unknown";
+  if (value === "pack_opened") return "Pack Opened";
+  if (value === "transferred") return "Transferred";
+  if (value === "listed") return "Listed";
+  if (value === "delisted") return "Delisted";
+  if (value === "bought") return "Buy";
+  if (value === "sold") return "Sold";
+  if (value === "minted") return "Minted";
+  return "Unknown";
 }
 
 function activityClass(value: string | null | undefined) {
@@ -465,9 +496,9 @@ export function NftListPage() {
             <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
               <th className="w-[120px] text-center font-medium px-5 py-3">Category</th>
               <th className="text-left font-medium px-5 py-3">NFT</th>
-              <th className="text-center font-medium px-5 py-3">Current State</th>
+              <th className="text-center font-medium px-5 py-3">Current Status</th>
               <th className="text-left font-medium px-5 py-3">Last Activity</th>
-              <th className="text-left font-medium px-5 py-3">Latest Market Price</th>
+              <th className="text-left font-medium px-5 py-3">Last Listed Price</th>
               <th className="text-left font-medium px-5 py-3">Latest Verified Sale</th>
               <th className="text-left font-medium px-5 py-3">Latest Listing</th>
               <th className="text-center font-medium px-5 py-3">Asset Type</th>
@@ -526,7 +557,7 @@ export function NftListPage() {
                   </td>
                   <td className="px-5 py-3 text-center">
                     <span className={`rounded border px-2 py-1 text-xs ${statusClass(currentState)}`}>
-                      {statusLabel(currentState)}
+                      {displayCurrentStatus({ currentState: nft.currentState, currentStatus: nft.currentStatus, isListed: nft.isListed, lastActivityAt: nft.lastActivityAt, owner: nft.owner })}
                     </span>
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
@@ -535,13 +566,6 @@ export function NftListPage() {
                         {activityLabel(nft.lastActivityType)}
                       </span>
                       {nft.lastActivityAt ? <span><RelativeTime iso={nft.lastActivityAt} /></span> : <span>Not detected</span>}
-                      {nft.lastActivityTxHash && txUrl(nft.lastActivityTxHash) ? (
-                        <a className="font-mono text-primary hover:underline" href={txUrl(nft.lastActivityTxHash) ?? undefined} target="_blank" rel="noreferrer">
-                          {short(nft.lastActivityTxHash)}
-                        </a>
-                      ) : nft.lastActivityTxHash ? (
-                        <span className="font-mono">{short(nft.lastActivityTxHash)}</span>
-                      ) : null}
                     </div>
                   </td>
                   <td className="px-5 py-3 text-xs">
