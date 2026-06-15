@@ -604,6 +604,86 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
   };
 }
 
+function asMarketStatus(value: unknown): NFTMarketStatus | null {
+  const status = asString(value);
+  if (
+    status === "owned"
+    || status === "unlisted"
+    || status === "listed"
+    || status === "sold"
+    || status === "transferred_out"
+    || status === "recently_sold"
+    || status === "stale"
+    || status === "unknown"
+  ) return status;
+  return null;
+}
+
+function resolveStoredActivityState(input: {
+  row: SqlRow | undefined;
+  detectedActivity: ReturnType<typeof detectActivityFromTx>;
+  detectedAt: string | null;
+  detectedTxHash: string | null;
+  owner: string | null;
+}) {
+  const baseState = asMarketStatus(input.row?.current_state) ?? asMarketStatus(input.row?.current_status) ?? input.detectedActivity.state;
+  if (input.detectedActivity.type !== "unknown") {
+    return {
+      currentState: input.detectedActivity.state,
+      lastActivityType: input.detectedActivity.type,
+      lastActivityAt: input.detectedAt,
+      lastActivityTxHash: input.detectedTxHash,
+      lastActivityProvider: "helius",
+      reason: input.detectedActivity.reason,
+    };
+  }
+
+  const storedActivityType = asString(input.row?.last_activity_type);
+  const storedActivityAt = asString(input.row?.last_activity_at);
+  const storedActivityTxHash = asString(input.row?.last_activity_tx_hash);
+  const storedActivityProvider = asString(input.row?.last_activity_provider) ?? asString(input.row?.latest_provider) ?? "helius";
+  const storedActivityAtMs = parseDate(storedActivityAt) ?? 0;
+  const detectedAtMs = parseDate(input.detectedAt) ?? 0;
+
+  if (storedActivityType && storedActivityType !== "unknown" && storedActivityAtMs >= detectedAtMs) {
+    return {
+      currentState: baseState,
+      lastActivityType: storedActivityType as NFTLastActivityType,
+      lastActivityAt: storedActivityAt,
+      lastActivityTxHash: storedActivityTxHash ?? input.detectedTxHash,
+      lastActivityProvider: storedActivityProvider,
+      reason: `preserved stored activity because it is more recent or more informative than the current unknown detection (${storedActivityType})`,
+    };
+  }
+
+  const hasStoredVerifiedSale = Boolean(
+    asString(input.row?.last_sale_at)
+    || numberFromUnknown(input.row?.last_sale_price_sol) != null
+    || numberFromUnknown(input.row?.last_sale_price_usd) != null
+  );
+  if (hasStoredVerifiedSale) {
+    const currentState = input.owner ? "owned" : "sold";
+    const lastActivityType: NFTLastActivityType = input.owner ? "bought" : "sold";
+    return {
+      currentState,
+      lastActivityType,
+      lastActivityAt: asString(input.row?.last_sale_at) ?? input.detectedAt,
+      lastActivityTxHash: asString(input.row?.latest_tx_hash) ?? input.detectedTxHash,
+      lastActivityProvider: asString(input.row?.latest_provider) ?? asString(input.row?.last_activity_provider) ?? "helius",
+      reason: `fell back to stored verified sale because market price exists without a detected current activity (${lastActivityType})`,
+    };
+  }
+
+  return {
+    currentState: input.detectedActivity.state,
+    lastActivityType: input.detectedActivity.type,
+    lastActivityAt: input.detectedAt,
+    lastActivityTxHash: input.detectedTxHash,
+    lastActivityProvider: "helius",
+    reason: input.detectedActivity.reason,
+  };
+}
+
 function metadataStatus(input: { name: string | null; image: string | null; owner: string | null }): NFTMetadataStatus {
   const complete = Boolean(input.name && input.image && input.owner);
   if (complete) return "complete";
@@ -640,6 +720,7 @@ function updateAssetFromEnrichment(input: {
   lastActivityType: NFTLastActivityType;
   lastActivityAt: string | null;
   lastActivityTxHash: string | null;
+  lastActivityProvider: string;
   sale: RwaNftMarketEvent | null;
   metadataStatus: NFTMetadataStatus;
 }) {
@@ -718,7 +799,7 @@ function updateAssetFromEnrichment(input: {
     input.lastActivityType,
     input.lastActivityAt,
     input.lastActivityTxHash,
-    "helius",
+    input.lastActivityProvider,
     "helius",
     input.lastActivityTxHash,
     input.sale?.priceSol ?? null,
@@ -888,7 +969,7 @@ function buildRefreshReason(row: SqlRow | undefined, ttlSeconds: number) {
   return "fresh enough";
 }
 
-function mergeEnrichmentPreview(row: SqlRow | undefined, normalized: ReturnType<typeof normalizeHeliusAsset>, activity: ReturnType<typeof detectActivityFromTx>, metadata: NFTMetadataStatus, lastActivityAt: string | null, lastActivityTxHash: string | null) {
+function mergeEnrichmentPreview(row: SqlRow | undefined, normalized: ReturnType<typeof normalizeHeliusAsset>, activity: ReturnType<typeof detectActivityFromTx>, metadata: NFTMetadataStatus, currentState: NFTMarketStatus, lastActivityType: NFTLastActivityType, lastActivityAt: string | null, lastActivityTxHash: string | null, lastActivityProvider: string) {
   const detectedCategory = detectRwaNftCategory({
     name: normalized.name,
     description: normalized.description,
@@ -921,12 +1002,12 @@ function mergeEnrichmentPreview(row: SqlRow | undefined, normalized: ReturnType<
     interface: asString(base.interface) ?? normalized.interface,
     source_collection: asString(base.source_collection) ?? normalized.collection,
     source_provider: asString(base.source_provider) ?? "helius",
-    current_state: activity.state,
-    current_status: activity.state,
-    last_activity_type: activity.type,
+    current_state: currentState,
+    current_status: currentState,
+    last_activity_type: lastActivityType,
     last_activity_at: lastActivityAt,
     last_activity_tx_hash: lastActivityTxHash ?? asString(base.last_activity_tx_hash),
-    last_activity_provider: "helius",
+    last_activity_provider: lastActivityProvider,
     latest_provider: "helius",
     latest_tx_hash: activity.sale?.txSignature ?? asString(base.latest_tx_hash),
     latest_market_price_sol: activity.sale?.priceSol ?? (typeof base.latest_market_price_sol === "number" ? base.latest_market_price_sol : null),
@@ -937,7 +1018,7 @@ function mergeEnrichmentPreview(row: SqlRow | undefined, normalized: ReturnType<
     validation_status: activity.sale?.txSignature ? "verified" : asString(base.validation_status) ?? "unverified",
     raw_market_state_json: stringifyJson({
       provider: "helius",
-      lastActivityType: activity.type,
+      lastActivityType,
       lastActivityAt,
       latestMarketPricePriority: activity.sale?.txSignature ? "verified_sale" : "unknown",
     }),
@@ -968,9 +1049,12 @@ type DerivedListingMarketState = {
 
 function deriveListingMarketState(input: {
   row: SqlRow;
-  activity: ReturnType<typeof detectActivityFromTx>;
-  listingResult: ActiveMintListingLookupResult | null;
+  currentState: NFTMarketStatus;
+  lastActivityType: NFTLastActivityType;
   lastActivityAt: string | null;
+  lastActivityProvider: string;
+  sale: RwaNftMarketEvent | null;
+  listingResult: ActiveMintListingLookupResult | null;
 }) : DerivedListingMarketState {
   const listing = input.listingResult?.listing ?? null;
   const hasListing = Boolean(input.listingResult?.found && listing);
@@ -978,20 +1062,20 @@ function deriveListingMarketState(input: {
   const listingIsNewer = hasListing && Boolean(listingAt) && ((parseDate(listingAt) ?? 0) >= (parseDate(input.lastActivityAt) ?? 0));
   const currentState = hasListing
     ? "listed"
-    : input.activity.state === "listed"
+    : input.currentState === "listed"
       ? "owned"
-      : input.activity.state;
-  const lastActivityType = hasListing && listingIsNewer ? "listed" : input.activity.type;
+      : input.currentState;
+  const lastActivityType = hasListing && listingIsNewer ? "listed" : input.lastActivityType;
   const lastActivityAt = hasListing && listingIsNewer ? (listingAt ?? input.lastActivityAt) : input.lastActivityAt;
-  const lastActivityProvider = hasListing && listingIsNewer ? listing!.providerId : "helius";
-  const latestProvider = input.activity.sale?.txSignature ? "helius" : hasListing ? listing!.providerId : "helius";
-  const latestMarketplace = input.activity.sale?.marketplace ?? (hasListing ? listing!.marketplace : asString(input.row.latest_marketplace));
+  const lastActivityProvider = hasListing && listingIsNewer ? listing!.providerId : input.lastActivityProvider;
+  const latestProvider = input.sale?.txSignature ? "helius" : hasListing ? listing!.providerId : asString(input.row.latest_provider) ?? input.lastActivityProvider;
+  const latestMarketplace = input.sale?.marketplace ?? (hasListing ? listing!.marketplace : asString(input.row.latest_marketplace));
   const latestMarketPriceSol =
-    input.activity.sale?.priceSol
+    input.sale?.priceSol
     ?? (typeof input.row.latest_market_price_sol === "number" ? input.row.latest_market_price_sol : null)
     ?? (hasListing ? listing!.priceSol : null);
   const latestMarketPriceUsd =
-    input.activity.sale?.priceUsd
+    input.sale?.priceUsd
     ?? (typeof input.row.latest_market_price_usd === "number" ? input.row.latest_market_price_usd : null)
     ?? (hasListing ? listing!.priceUsd : null);
 
@@ -1020,7 +1104,7 @@ function deriveListingMarketState(input: {
       } : null,
       lastActivityType,
       lastActivityAt,
-      latestMarketPricePriority: input.activity.sale?.txSignature ? "verified_sale" : hasListing ? "active_listing" : "unknown",
+      latestMarketPricePriority: input.sale?.txSignature ? "verified_sale" : hasListing ? "active_listing" : "unknown",
       listingProvidersChecked: input.listingResult?.providersChecked ?? [],
     }),
   };
@@ -1189,8 +1273,17 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
             nftTransfers: [],
           },
         };
-    const lastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
-    const lastActivityTxHash = latestTx ? txSignature(latestTx) : null;
+    const detectedLastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
+    const detectedLastActivityTxHash = latestTx ? txSignature(latestTx) : null;
+    const resolvedActivity = resolveStoredActivityState({
+      row,
+      detectedActivity: activity,
+      detectedAt: detectedLastActivityAt,
+      detectedTxHash: detectedLastActivityTxHash,
+      owner: normalized.owner,
+    });
+    const lastActivityAt = resolvedActivity.lastActivityAt;
+    const lastActivityTxHash = resolvedActivity.lastActivityTxHash;
     const detectedCategory = detectRwaNftCategory({
       name: normalized.name,
       description: normalized.description,
@@ -1214,6 +1307,7 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
       console.log(`[NFT LOOKUP][DEBUG] tokenTransfers=${activity.debug.tokenTransfers.length ? activity.debug.tokenTransfers.join(" | ") : "none"}`);
       console.log(`[NFT LOOKUP][DEBUG] nftTransfers=${activity.debug.nftTransfers.length ? activity.debug.nftTransfers.join(" | ") : "none"}`);
       console.log(`[NFT LOOKUP][DEBUG] reason=${activity.reason}`);
+      if (resolvedActivity.reason !== activity.reason) console.log(`[NFT LOOKUP][DEBUG] resolvedReason=${resolvedActivity.reason}`);
     }
 
     if (activity.sale?.txSignature) {
@@ -1239,12 +1333,15 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     }
 
     const market = row?.market && asString(row.market) ? asString(row.market) : isAllowedRwaNftCategory(detectedCategory) ? detectedCategory : "unknown";
-    const previewBaseRow = mergeEnrichmentPreview(row, normalized, activity, metadata, lastActivityAt, lastActivityTxHash);
+    const previewBaseRow = mergeEnrichmentPreview(row, normalized, activity, metadata, resolvedActivity.currentState, resolvedActivity.lastActivityType, lastActivityAt, lastActivityTxHash, resolvedActivity.lastActivityProvider);
     const listingMarketState = deriveListingMarketState({
       row: previewBaseRow,
-      activity,
-      listingResult,
+      currentState: resolvedActivity.currentState,
+      lastActivityType: resolvedActivity.lastActivityType,
       lastActivityAt,
+      lastActivityProvider: resolvedActivity.lastActivityProvider,
+      sale: activity.sale,
+      listingResult,
     });
     const previewRow = applyListingMarketStateToPreviewRow(previewBaseRow, listingMarketState);
     console.log(`[NFT LOOKUP] final state=${listingMarketState.currentState}`);
@@ -1278,10 +1375,11 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
       row: row ?? mergePreviewRow(null, { mint, market, category: market, asset_type: "unknown", public_group: "other" }),
       normalized,
       rawAsset,
-      currentState: activity.state,
-      lastActivityType: activity.type,
-      lastActivityAt,
+      currentState: listingMarketState.currentState,
+      lastActivityType: listingMarketState.lastActivityType,
+      lastActivityAt: listingMarketState.lastActivityAt,
       lastActivityTxHash,
+      lastActivityProvider: listingMarketState.lastActivityProvider,
       sale: activity.sale,
       metadataStatus: metadata,
     });
@@ -1389,8 +1487,17 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
         attributes: normalized.attributes,
         raw: rawAsset,
       });
-      const lastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
-      const lastActivityTxHash = latestTx ? txSignature(latestTx) : null;
+      const detectedLastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
+      const detectedLastActivityTxHash = latestTx ? txSignature(latestTx) : null;
+      const resolvedActivity = resolveStoredActivityState({
+        row,
+        detectedActivity: activity,
+        detectedAt: detectedLastActivityAt,
+        detectedTxHash: detectedLastActivityTxHash,
+        owner: normalized.owner,
+      });
+      const lastActivityAt = resolvedActivity.lastActivityAt;
+      const lastActivityTxHash = resolvedActivity.lastActivityTxHash;
       if (latestTx && focusMint === mint) {
         console.log(`[NFT LIST ENRICH][DEBUG] mint=${mint} txHash=${activity.debug.txHash ?? "unknown"} currentOwner=${activity.debug.currentOwner ?? "unknown"} nftReceiver=${activity.debug.nftReceiver ?? "unknown"}`);
         console.log(`[NFT LIST ENRICH][DEBUG] txType=${activity.debug.detectedType ?? "unknown"} source=${activity.debug.source ?? "unknown"} description=${activity.debug.description ?? "unknown"}`);
@@ -1400,12 +1507,13 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
         console.log(`[NFT LIST ENRICH][DEBUG] tokenTransfers=${activity.debug.tokenTransfers.length ? activity.debug.tokenTransfers.join(" | ") : "none"}`);
         console.log(`[NFT LIST ENRICH][DEBUG] nftTransfers=${activity.debug.nftTransfers.length ? activity.debug.nftTransfers.join(" | ") : "none"}`);
         console.log(`[NFT LIST ENRICH][DEBUG] reason=${activity.reason}`);
+        if (resolvedActivity.reason !== activity.reason) console.log(`[NFT LIST ENRICH][DEBUG] resolvedReason=${resolvedActivity.reason}`);
       }
       const change = buildChange({
         row,
         normalized,
-        currentState: activity.state,
-        lastActivityType: activity.type,
+        currentState: resolvedActivity.currentState,
+        lastActivityType: resolvedActivity.lastActivityType,
         lastActivityAt,
         lastActivityTxHash,
         metadataStatus: metadata,
@@ -1418,13 +1526,13 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       if (change.ownerUpdated) ownersUpdated += 1;
       if (change.assetTypeUpdated) assetTypesUpdated += 1;
       if (change.categoryUpdated) categoriesUpdated += 1;
-      if (activity.type !== "unknown") lastActivitiesDetected += 1;
+      if (resolvedActivity.lastActivityType !== "unknown") lastActivitiesDetected += 1;
       if (change.lastActivityUpdated) lastActivitiesUpdated += 1;
       if (activity.sale?.txSignature) verifiedSalesDetected += 1;
       changes.push(change);
 
       if (dryRun) {
-        console.log(`[NFT LIST ENRICH][DRY RUN] ${mint} metadata=${metadata} state=${activity.state} lastActivity=${activity.type} tx=${lastActivityTxHash ?? "none"}`);
+        console.log(`[NFT LIST ENRICH][DRY RUN] ${mint} metadata=${metadata} state=${resolvedActivity.currentState} lastActivity=${resolvedActivity.lastActivityType} tx=${lastActivityTxHash ?? "none"}`);
         continue;
       }
 
@@ -1437,10 +1545,11 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
         row,
         normalized,
         rawAsset,
-        currentState: activity.state,
-        lastActivityType: activity.type,
+        currentState: resolvedActivity.currentState,
+        lastActivityType: resolvedActivity.lastActivityType,
         lastActivityAt,
         lastActivityTxHash,
+        lastActivityProvider: resolvedActivity.lastActivityProvider,
         sale: activity.sale,
         metadataStatus: metadata,
       });
