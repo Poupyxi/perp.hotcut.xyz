@@ -473,7 +473,7 @@ function inferCoreTransferReceiver(tx: Record<string, unknown>, mint: string, ow
   };
 }
 
-function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null): {
+function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null, recentTxCount = 0): {
   type: NFTLastActivityType;
   state: NFTMarketStatus;
   sale: RwaNftMarketEvent | null;
@@ -496,6 +496,7 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
   const sales = parseHeliusEnhancedTransaction(tx, { fallbackMint: mint, fallbackOwner: owner }).filter((event) => event.eventType === "SALE");
   const sale = sales[0] ?? null;
   const packEvidence = detectPackOpeningEvidence(tx, mint, owner, collectionAddress);
+  const firstObservedMintActivity = recentTxCount > 0 && recentTxCount <= 1;
   const instructionProgramList = instructionPrograms(tx);
   const nativeTransferSummary = summarizeNativeTransfers(tx);
   const tokenTransferSummary = summarizeTokenTransfers(tx);
@@ -539,6 +540,15 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
 
   const inferredCoreTransfer = inferCoreTransferReceiver(tx, mint, owner, collectionAddress);
   if (inferredCoreTransfer) {
+    if (firstObservedMintActivity && packEvidence.matched) {
+      return {
+        type: "pack_opened",
+        state: owner ? "owned" : "unknown",
+        sale: null,
+        reason: `first observed mint activity matched pack-opening allowlist before any later transfer history: ${packEvidence.reason}`,
+        debug: commonDebug,
+      };
+    }
     return {
       type: "transferred",
       state: owner ? "owned" : "transferred_out",
@@ -592,6 +602,15 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: owner ? "owned" : "transferred_out",
       sale: null,
       reason: `transaction text only showed transfer wording and pack evidence stayed insufficient: ${packEvidence.reason}`,
+      debug: commonDebug,
+    };
+  }
+  if (firstObservedMintActivity && owner && !packEvidence.matched && !paymentLooksLikeSecondarySale(tx, owner)) {
+    return {
+      type: "minted",
+      state: "owned",
+      sale: null,
+      reason: "only one observed mint transaction exists and no sale, listing, transfer, or pack-opening pattern was strong enough",
       debug: commonDebug,
     };
   }
@@ -1252,7 +1271,7 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     const txs = await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)));
     const latestTx = txs[0] ?? null;
     const activity = latestTx
-      ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection)
+      ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection, signatureValues.length)
       : {
           type: "unknown" as const,
           state: normalized.owner ? "owned" as const : "unknown" as const,
@@ -1453,7 +1472,7 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       const txs = await withRetries(config.nftListEnrichMaxRetries, () => enhancedTransactions(signatureValues.slice(0, 8)));
       const latestTx = txs[0] ?? null;
       const activity = latestTx
-        ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection)
+        ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection, signatureValues.length)
         : {
             type: "unknown" as const,
             state: normalized.owner ? "owned" as const : "unknown" as const,
