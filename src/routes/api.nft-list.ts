@@ -130,7 +130,7 @@ export const Route = createFileRoute("/api/nft-list")({
             : sort === "updated_desc"
               ? "updated_at DESC"
               : sort === "checked_desc"
-                ? "CASE WHEN last_activity_at IS NOT NULL OR last_sale_at IS NOT NULL OR latest_market_price_sol IS NOT NULL OR latest_market_price_usd IS NOT NULL OR listed_price_sol IS NOT NULL OR listed_price_usd IS NOT NULL THEN 0 ELSE 1 END ASC, last_checked_at IS NULL ASC, last_checked_at DESC"
+                ? "CASE WHEN last_sale_at IS NOT NULL OR latest_market_price_sol IS NOT NULL OR latest_market_price_usd IS NOT NULL OR listed_price_sol IS NOT NULL OR listed_price_usd IS NOT NULL THEN 0 WHEN COALESCE(last_activity_type, 'unknown') != 'unknown' OR last_activity_at IS NOT NULL THEN 1 ELSE 2 END ASC, last_checked_at IS NULL ASC, last_checked_at DESC"
                 : sort === "market_price_desc"
                   ? "latest_market_price_usd IS NULL ASC, latest_market_price_usd DESC, latest_market_price_sol DESC"
                   : sort === "market_price_asc"
