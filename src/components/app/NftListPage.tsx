@@ -3,6 +3,8 @@ import { RelativeTime } from "./RelativeTime";
 import { categoryIcon } from "./categoryIcons";
 import { ScannerStatusPanel } from "./ScannerStatusPanel";
 
+const AUTO_REFRESH_MS = 60_000;
+
 type NftAsset = {
   mint: string;
   name: string | null;
@@ -246,6 +248,13 @@ function txUrl(value: string | null | undefined) {
   return value ? `https://solscan.io/tx/${value}` : null;
 }
 
+function formatCountdown(seconds: number) {
+  const safe = Math.max(0, Math.trunc(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
 function NftImage({ src, name }: { src: string | null; name: string | null }) {
   const [failed, setFailed] = useState(false);
 
@@ -276,6 +285,8 @@ export function NftListPage() {
   const [error, setError] = useState<string | null>(null);
   const [mintLookupLoading, setMintLookupLoading] = useState(false);
   const [mintLookupNote, setMintLookupNote] = useState<string | null>(null);
+  const [nextRefreshAt, setNextRefreshAt] = useState(() => Date.now() + AUTO_REFRESH_MS);
+  const [refreshCountdownSeconds, setRefreshCountdownSeconds] = useState(() => Math.ceil(AUTO_REFRESH_MS / 1000));
 
   const [category, setCategory] = useState("all");
   const [assetType, setAssetType] = useState("all");
@@ -334,6 +345,8 @@ export function NftListPage() {
         setNfts(payload.nfts ?? []);
         setTotal(payload.total ?? 0);
 
+        setNextRefreshAt(Date.now() + AUTO_REFRESH_MS);
+
         if (isMintSearch && page === 1) {
           console.log("[NFT LIST][SEARCH] forcing on-demand refresh", {
             searchedMint,
@@ -371,12 +384,24 @@ export function NftListPage() {
     }
 
     void load(true);
-    const refresh = window.setInterval(() => void load(false), 60_000);
+    setNextRefreshAt(Date.now() + AUTO_REFRESH_MS);
+    const refresh = window.setInterval(() => {
+      setNextRefreshAt(Date.now() + AUTO_REFRESH_MS);
+      void load(false);
+    }, AUTO_REFRESH_MS);
     return () => {
       controller.abort();
       window.clearInterval(refresh);
     };
   }, [query]);
+
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      setRefreshCountdownSeconds(Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000)));
+    }, 1000);
+    setRefreshCountdownSeconds(Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000)));
+    return () => window.clearInterval(tick);
+  }, [nextRefreshAt]);
 
   const resultStart = total === 0 ? 0 : (page - 1) * limit + 1;
   const resultEnd = Math.min(page * limit, total);
@@ -468,7 +493,13 @@ export function NftListPage() {
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3 text-sm text-muted-foreground flex items-center justify-between gap-3">
           <span>{loading ? loadingLabel : `Showing ${resultStart}-${resultEnd} of ${total.toLocaleString("en-US")} NFTs`}</span>
-          {!includeOther && !includeUnknown && <span className="text-xs">Cards only · other assets hidden</span>}
+          <div className="flex items-center gap-3 text-xs">
+            <span className="inline-flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
+              Next update in {formatCountdown(refreshCountdownSeconds)}
+            </span>
+            {!includeOther && !includeUnknown && <span>Cards only · other assets hidden</span>}
+          </div>
         </div>
 
         <table className="w-full text-sm">
