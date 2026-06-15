@@ -98,7 +98,7 @@ function selectAssets(options: EnrichNFTListOptions, limit: number) {
     sql += " WHERE mint = ?";
     params.push(options.mint);
   }
-  sql += " ORDER BY last_checked_at IS NULL DESC, last_checked_at ASC, updated_at DESC";
+  sql += " ORDER BY CASE WHEN last_sale_at IS NOT NULL OR latest_market_price_sol IS NOT NULL OR latest_market_price_usd IS NOT NULL OR listed_price_sol IS NOT NULL OR listed_price_usd IS NOT NULL THEN 0 WHEN COALESCE(last_activity_type, 'unknown') != 'unknown' OR last_activity_at IS NOT NULL THEN 1 WHEN metadata_status IS NULL OR metadata_status != 'complete' OR image IS NULL OR image = '' OR owner IS NULL OR owner = '' THEN 2 ELSE 3 END ASC, last_checked_at IS NULL DESC, last_checked_at ASC, updated_at DESC";
   if (!options.mint) {
     sql += " LIMIT ?";
     params.push(Math.max(Math.trunc(options.limit ?? limit), 1));
