@@ -187,18 +187,8 @@ function ownerPrefix(value: string | null | undefined) {
   return value ? value.slice(0, 4) : null;
 }
 
-function displayCurrentStatus(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed" | "owner">) {
-  const state = currentStateValue(nft);
-  if (state === "owned") {
-    const prefix = ownerPrefix(nft.owner);
-    return prefix ? `Wallet ${prefix}` : "Wallet";
-  }
-  if (state === "listed") return "Listed";
-  if (state === "transferred_out") return "Transferred Out";
-  if (state === "sold") return "Sold";
-  if (state === "stale") return "Needs Review";
-  if (state === "unlisted") return "Not Listed";
-  return "Unknown";
+function displayWalletOwner(nft: Pick<NftAsset, "owner">) {
+  return ownerPrefix(nft.owner) ?? "Unknown";
 }
 
 function currentStateValue(nft: Pick<NftAsset, "currentState" | "currentStatus" | "isListed">) {
@@ -486,12 +476,11 @@ export function NftListPage() {
             <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
               <th className="w-[120px] text-center font-medium px-5 py-3">Category</th>
               <th className="text-left font-medium px-5 py-3">NFT</th>
-              <th className="text-center font-medium px-5 py-3">Current Status</th>
+              <th className="text-center font-medium px-5 py-3">Wallet</th>
               <th className="text-left font-medium px-5 py-3">Last Activity</th>
               <th className="text-left font-medium px-5 py-3">Last Listed Price</th>
               <th className="text-left font-medium px-5 py-3">Latest Verified Sale</th>
-              <th className="text-left font-medium px-5 py-3">Latest Listing</th>
-              <th className="text-center font-medium px-5 py-3">Asset Type</th>
+                            <th className="text-center font-medium px-5 py-3">Asset Type</th>
               <th className="w-[90px] text-center font-medium px-5 py-3">Source</th>
               <th className="text-left font-medium px-5 py-3">Provider</th>
               <th className="text-right font-medium px-5 py-3">Last Checked</th>
@@ -500,10 +489,10 @@ export function NftListPage() {
 
           <tbody className="divide-y divide-border">
             {loading ? (
-              <tr><td colSpan={11} className="px-5 py-8 text-sm text-muted-foreground">Loading NFTs...</td></tr>
+              <tr><td colSpan={10} className="px-5 py-8 text-sm text-muted-foreground">Loading NFTs...</td></tr>
             ) : nfts.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-5 py-8 text-sm text-muted-foreground">
+                <td colSpan={10} className="px-5 py-8 text-sm text-muted-foreground">
                   <div className="space-y-1">
                     <div>No NFTs match these filters.</div>
                     {mintLookupNote && <div className="text-xs">{mintLookupNote}</div>}
@@ -511,18 +500,13 @@ export function NftListPage() {
                 </td>
               </tr>
             ) : nfts.map((nft) => {
-              const currentState = currentStateValue(nft);
-              const isActivelyListed = isActivelyListedValue(nft);
               const latestMarketPrice = fmtPrice(nft.latestMarketPriceSol, nft.latestMarketPriceUsd);
               const lastSale = fmtPrice(nft.lastSalePriceSol, nft.lastSalePriceUsd);
-              const activeListing = renderedLatestListingLabel(nft);
               console.log("[NFT LIST][ROW]", {
                 mint: nft.mint,
-                currentState,
-                isListed: nft.isListed,
-                latestListingPriceSol: nft.latestListingPriceSol,
+                ownerPrefix: ownerPrefix(nft.owner),
                 latestMarketPriceSol: nft.latestMarketPriceSol,
-                renderedLatestListingLabel: activeListing,
+                lastSalePriceSol: nft.lastSalePriceSol,
               });
               return (
                 
@@ -546,8 +530,8 @@ export function NftListPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-center">
-                    <span className={`rounded border px-2 py-1 text-xs ${statusClass(currentState)}`}>
-                      {displayCurrentStatus({ currentState: nft.currentState, currentStatus: nft.currentStatus, isListed: nft.isListed, owner: nft.owner })}
+                    <span className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground">
+                      {displayWalletOwner({ owner: nft.owner })}
                     </span>
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
@@ -576,16 +560,6 @@ export function NftListPage() {
                       </div>
                     ) : (
                       "No verified sale"
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-xs text-muted-foreground">
-                    {isActivelyListed && activeListing !== "Not listed" ? (
-                      <div>
-                        <div className="font-mono">{activeListing}</div>
-                        <div>{nft.listingMarketplace ?? "Listing source unknown"}</div>
-                      </div>
-                    ) : (
-                      "Not listed"
                     )}
                   </td>
                   <td className="px-5 py-3 text-center">
