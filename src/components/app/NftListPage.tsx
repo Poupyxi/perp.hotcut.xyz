@@ -89,6 +89,7 @@ const SOURCE_COLLECTION_OPTIONS = [
 
 const STATUS_OPTIONS = [
   ["all", "All statuses"],
+  ["hold", "Hold"],
   ["owned", "Owned"],
   ["listed", "Listed"],
   ["unlisted", "Unlisted"],

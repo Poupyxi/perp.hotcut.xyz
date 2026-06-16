@@ -33,6 +33,36 @@ function countValue(row: Record<string, unknown> | undefined, key = "count") {
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
+function asString(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function isHoldDisplayStatus(input: {
+  currentState: string | null;
+  currentStatus: string | null;
+  isListed: unknown;
+  lastActivityType: string | null;
+  lastActivityAt: string | null;
+}) {
+  const currentState = input.currentState ?? input.currentStatus ?? "unknown";
+  if (currentState === "listed" || input.isListed === 1 || input.isListed === true) return false;
+  if (input.lastActivityType !== "delisted" || !input.lastActivityAt) return false;
+  const activityAt = Date.parse(input.lastActivityAt);
+  if (!Number.isFinite(activityAt)) return false;
+  return Date.now() - activityAt >= 30 * 60 * 1000;
+}
+
+function derivedDisplayStatus(input: {
+  currentState: string | null;
+  currentStatus: string | null;
+  isListed: unknown;
+  lastActivityType: string | null;
+  lastActivityAt: string | null;
+}) {
+  if (isHoldDisplayStatus(input)) return "hold";
+  return input.currentState ?? input.currentStatus ?? "unknown";
+}
+
 export const Route = createFileRoute("/api/nft-list")({
   server: {
     handlers: {
@@ -91,8 +121,17 @@ export const Route = createFileRoute("/api/nft-list")({
         }
 
         if (status && status !== "all") {
-          where.push("COALESCE(current_state, current_status, 'unknown') = ?");
-          params.push(status);
+          if (status === "hold") {
+            where.push("COALESCE(current_state, current_status, 'unknown') != 'listed'");
+            where.push("COALESCE(is_listed, 0) = 0");
+            where.push("last_activity_type = 'delisted'");
+            where.push("last_activity_at IS NOT NULL");
+            where.push("last_activity_at <= ?");
+            params.push(new Date(Date.now() - 30 * 60 * 1000).toISOString());
+          } else {
+            where.push("COALESCE(current_state, current_status, 'unknown') = ?");
+            params.push(status);
+          }
         }
 
         if (sourceCollection) {
@@ -276,7 +315,13 @@ export const Route = createFileRoute("/api/nft-list")({
           listingMarketplace: typeof row.listing_marketplace === "string" ? row.listing_marketplace : null,
           lastListedAt: typeof row.listing_updated_at === "string" ? row.listing_updated_at : null,
           currentState: typeof row.current_state === "string" ? row.current_state : typeof row.current_status === "string" ? row.current_status : "unknown",
-          currentStatus: typeof row.current_state === "string" ? row.current_state : typeof row.current_status === "string" ? row.current_status : "unknown",
+          currentStatus: derivedDisplayStatus({
+            currentState: asString(row.current_state),
+            currentStatus: asString(row.current_status),
+            isListed: row.is_listed,
+            lastActivityType: asString(row.last_activity_type),
+            lastActivityAt: asString(row.last_activity_at),
+          }),
           lastActivityType: typeof row.last_activity_type === "string" ? row.last_activity_type : "unknown",
           lastActivityAt: typeof row.last_activity_at === "string" ? row.last_activity_at : null,
           lastActivityTxHash: typeof row.last_activity_tx_hash === "string" ? row.last_activity_tx_hash : null,

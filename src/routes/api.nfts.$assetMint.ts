@@ -1,5 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+function isHoldDisplayStatus(nft: Record<string, unknown>) {
+  const currentState = typeof nft.currentState === "string" ? nft.currentState : typeof nft.currentStatus === "string" ? nft.currentStatus : "unknown";
+  const isListed = nft.isListed === true;
+  const lastActivityType = typeof nft.lastActivityType === "string" ? nft.lastActivityType : null;
+  const lastActivityAt = typeof nft.lastActivityAt === "string" ? nft.lastActivityAt : null;
+
+  if (currentState === "listed" || isListed) return false;
+  if (lastActivityType !== "delisted" || !lastActivityAt) return false;
+  const activityAt = Date.parse(lastActivityAt);
+  if (!Number.isFinite(activityAt)) return false;
+  return Date.now() - activityAt >= 30 * 60 * 1000;
+}
+
 export const Route = createFileRoute("/api/nfts/$assetMint")({
   server: {
     handlers: {
@@ -19,7 +32,12 @@ export const Route = createFileRoute("/api/nfts/$assetMint")({
 
         return Response.json(
           {
-            nft: result.nft,
+            nft: {
+              ...result.nft,
+              currentStatus: isHoldDisplayStatus(result.nft as Record<string, unknown>)
+                ? "hold"
+                : (typeof result.nft.currentStatus === "string" ? result.nft.currentStatus : result.nft.currentState),
+            },
             cacheHit: result.cacheHit,
             refreshed: result.heliusCalled && result.dbUpdated,
             providerUsed: result.providerUsed,
