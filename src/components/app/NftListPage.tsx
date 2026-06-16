@@ -46,6 +46,17 @@ type NftAsset = {
   lastSaleMarketplace: string | null;
 };
 
+type NftListStats = {
+  listedTotal: number;
+  listedLast10Minutes: number;
+  verifiedSalesTotal: number;
+  verifiedSalesLast10Minutes: number;
+  transferredTotal: number;
+  transferredLast10Minutes: number;
+  mintedTotal: number;
+  mintedLast10Minutes: number;
+};
+
 const CATEGORY_OPTIONS = [
   ["all", "All categories"],
   ["pokemon", "Pokémon"],
@@ -279,6 +290,16 @@ function NftImage({ src, name }: { src: string | null; name: string | null }) {
 export function NftListPage() {
   const [nfts, setNfts] = useState<NftAsset[]>([]);
   const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState<NftListStats>({
+    listedTotal: 0,
+    listedLast10Minutes: 0,
+    verifiedSalesTotal: 0,
+    verifiedSalesLast10Minutes: 0,
+    transferredTotal: 0,
+    transferredLast10Minutes: 0,
+    mintedTotal: 0,
+    mintedLast10Minutes: 0,
+  });
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
   const [loading, setLoading] = useState(true);
@@ -339,11 +360,21 @@ export function NftListPage() {
           headers: { accept: "application/json" },
         });
 
-        const payload = await response.json() as { nfts?: NftAsset[]; total?: number; error?: string };
+        const payload = await response.json() as ({ nfts?: NftAsset[]; total?: number; error?: string } & Partial<NftListStats>);
         if (!response.ok) throw new Error(payload.error ?? "Unable to load NFT list");
 
         setNfts(payload.nfts ?? []);
         setTotal(payload.total ?? 0);
+        setStats({
+          listedTotal: payload.listedTotal ?? 0,
+          listedLast10Minutes: payload.listedLast10Minutes ?? 0,
+          verifiedSalesTotal: payload.verifiedSalesTotal ?? 0,
+          verifiedSalesLast10Minutes: payload.verifiedSalesLast10Minutes ?? 0,
+          transferredTotal: payload.transferredTotal ?? 0,
+          transferredLast10Minutes: payload.transferredLast10Minutes ?? 0,
+          mintedTotal: payload.mintedTotal ?? 0,
+          mintedLast10Minutes: payload.mintedLast10Minutes ?? 0,
+        });
 
         setNextRefreshAt(Date.now() + AUTO_REFRESH_MS);
 
@@ -410,8 +441,6 @@ export function NftListPage() {
   const loadingLabel = mintLookupLoading ? "Fetching NFT from Helius..." : "Loading results...";
 
   const visibleCards = nfts.filter((nft) => nft.assetType === "card").length;
-  const otherAssets = nfts.filter((nft) => nft.assetType !== "card").length;
-  const listedAssets = nfts.filter((nft) => isActivelyListedValue(nft)).length;
 
   return (
     <div className="space-y-6">
@@ -420,11 +449,13 @@ export function NftListPage() {
         <p className="text-sm text-muted-foreground mt-1">Tracked NFTs enriched with current status, verified sales, listings, and latest market price.</p>
       </div>
 
-      <div className="grid sm:grid-cols-4 gap-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="NFTs matching filters" value={loading ? "..." : total.toLocaleString("en-US")} />
         <Stat label="Cards on page" value={loading ? "..." : visibleCards.toString()} />
-        <Stat label="Other on page" value={loading ? "..." : otherAssets.toString()} />
-        <Stat label="Listed on page" value={loading ? "..." : listedAssets.toString()} />
+        <MarketActivityCard
+          loading={loading}
+          stats={stats}
+        />
       </div>
 
       <ScannerStatusPanel />
@@ -662,6 +693,62 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-border bg-card p-5">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1.5 text-2xl font-semibold font-mono tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function MarketActivityCard({ loading, stats }: { loading: boolean; stats: NftListStats }) {
+  const rows = [
+    {
+      label: "Listed",
+      total: stats.listedTotal,
+      recent: stats.listedLast10Minutes,
+      toneClass: activityClass("listed"),
+    },
+    {
+      label: "Verified Sales",
+      total: stats.verifiedSalesTotal,
+      recent: stats.verifiedSalesLast10Minutes,
+      toneClass: activityClass("sold"),
+    },
+    {
+      label: "Transferred",
+      total: stats.transferredTotal,
+      recent: stats.transferredLast10Minutes,
+      toneClass: activityClass("transferred"),
+    },
+    {
+      label: "Minted",
+      total: stats.mintedTotal,
+      recent: stats.mintedLast10Minutes,
+      toneClass: activityClass("minted"),
+    },
+  ];
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-5 sm:col-span-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-xs text-muted-foreground">Market & NFT Activity</div>
+        <div className="text-xs text-muted-foreground">Last 10 minutes</div>
+      </div>
+
+      <div className="mt-4 divide-y divide-border/60">
+        {rows.map((row) => (
+          <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 py-3 first:pt-0 last:pb-0">
+            <div className="min-w-0">
+              <span className={`inline-flex rounded border px-2 py-1 text-xs ${row.toneClass}`}>
+                {row.label}
+              </span>
+            </div>
+            <div className="text-right text-lg font-semibold font-mono tabular-nums">
+              {loading ? "..." : row.total.toLocaleString("en-US")}
+            </div>
+            <div className="text-right text-sm text-muted-foreground font-mono tabular-nums min-w-[2ch]">
+              {loading ? "..." : row.recent.toLocaleString("en-US")}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -28,6 +28,11 @@ function normalizeSort(value: string | null) {
   return "name_asc";
 }
 
+function countValue(row: Record<string, unknown> | undefined, key = "count") {
+  const value = row?.[key];
+  return typeof value === "number" ? value : Number(value ?? 0);
+}
+
 export const Route = createFileRoute("/api/nft-list")({
   server: {
     handlers: {
@@ -123,6 +128,7 @@ export const Route = createFileRoute("/api/nft-list")({
         }
 
         const whereSql = where.join(" AND ");
+        const last10MinutesIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
         const orderBy =
           sort === "name_desc"
@@ -141,6 +147,69 @@ export const Route = createFileRoute("/api/nft-list")({
 
         const totalRow = db.prepare(`SELECT COUNT(*) as total FROM nft_assets WHERE ${whereSql}`).get(...params) as { total?: number };
         const total = Number(totalRow?.total ?? 0);
+
+        const listedTotal = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND (COALESCE(current_state, current_status, 'unknown') = 'listed' OR is_listed = 1)
+        `).get(...params) as Record<string, unknown>);
+
+        const listedLast10Minutes = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND (COALESCE(current_state, current_status, 'unknown') = 'listed' OR is_listed = 1)
+            AND listing_updated_at IS NOT NULL
+            AND listing_updated_at >= ?
+        `).get(...params, last10MinutesIso) as Record<string, unknown>);
+
+        const verifiedSalesTotal = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_sale_at IS NOT NULL
+        `).get(...params) as Record<string, unknown>);
+
+        const verifiedSalesLast10Minutes = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_sale_at IS NOT NULL
+            AND last_sale_at >= ?
+        `).get(...params, last10MinutesIso) as Record<string, unknown>);
+
+        const transferredTotal = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_activity_type = 'transferred'
+        `).get(...params) as Record<string, unknown>);
+
+        const transferredLast10Minutes = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_activity_type = 'transferred'
+            AND last_activity_at IS NOT NULL
+            AND last_activity_at >= ?
+        `).get(...params, last10MinutesIso) as Record<string, unknown>);
+
+        const mintedTotal = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_activity_type = 'minted'
+        `).get(...params) as Record<string, unknown>);
+
+        const mintedLast10Minutes = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_activity_type = 'minted'
+            AND last_activity_at IS NOT NULL
+            AND last_activity_at >= ?
+        `).get(...params, last10MinutesIso) as Record<string, unknown>);
 
         const rows = db.prepare(`
           SELECT
@@ -262,6 +331,14 @@ export const Route = createFileRoute("/api/nft-list")({
             categoryCounts,
             assetTypeCounts,
             publicGroupCounts,
+            listedTotal,
+            listedLast10Minutes,
+            verifiedSalesTotal,
+            verifiedSalesLast10Minutes,
+            transferredTotal,
+            transferredLast10Minutes,
+            mintedTotal,
+            mintedLast10Minutes,
           },
           { headers: { "Cache-Control": "no-store" } },
         );
