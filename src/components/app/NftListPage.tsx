@@ -260,6 +260,10 @@ function txUrl(value: string | null | undefined) {
   return value ? `https://solscan.io/tx/${value}` : null;
 }
 
+function orbAddressUrl(value: string | null | undefined) {
+  return value ? `https://orbmarkets.io/address/${value}` : null;
+}
+
 function formatCountdown(seconds: number) {
   const safe = Math.max(0, Math.trunc(seconds));
   const mins = Math.floor(safe / 60);
@@ -593,9 +597,21 @@ export function NftListPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3 text-center">
-                    <span className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground">
-                      {displayWalletOwner({ owner: nft.owner })}
-                    </span>
+                    {orbAddressUrl(nft.owner) ? (
+                      <a
+                        href={orbAddressUrl(nft.owner) ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex rounded border border-border bg-surface px-2 py-1 text-xs text-foreground hover:bg-surface-raised hover:text-primary"
+                        title={nft.owner ?? undefined}
+                      >
+                        {displayWalletOwner({ owner: nft.owner })}
+                      </a>
+                    ) : (
+                      <span className="rounded border border-border bg-surface px-2 py-1 text-xs text-foreground">
+                        {displayWalletOwner({ owner: nft.owner })}
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
                     <div className="flex flex-col gap-1">
