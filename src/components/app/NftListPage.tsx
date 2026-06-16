@@ -49,6 +49,8 @@ type NftAsset = {
 type NftListStats = {
   listedTotal: number;
   listedLast10Minutes: number;
+  bidTotal: number;
+  bidLast10Minutes: number;
   verifiedSalesTotal: number;
   verifiedSalesLast10Minutes: number;
   transferredTotal: number;
@@ -101,6 +103,8 @@ const STATUS_OPTIONS = [
 
 const ACTIVITY_OPTIONS = [
   ["minted", "Minted"],
+  ["make_offer", "MakeOffer"],
+  ["bid", "Bid"],
   ["listed", "Listed"],
   ["delisted", "Delisted"],
   ["bought", "Bought"],
@@ -233,6 +237,8 @@ function activityLabel(value: string | null | undefined) {
   if (value === "pack_opened") return "Pack Opened";
   if (value === "transferred") return "Transferred";
   if (value === "listed") return "Listed";
+  if (value === "make_offer") return "MakeOffer";
+  if (value === "bid") return "Bid";
   if (value === "delisted") return "Delisted";
   if (value === "bought") return "Buy";
   if (value === "sold") return "Sold";
@@ -242,6 +248,8 @@ function activityLabel(value: string | null | undefined) {
 
 function activityClass(value: string | null | undefined) {
   if (value === "listed") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+  if (value === "make_offer") return "border-violet-500/40 bg-violet-500/10 text-violet-300";
+  if (value === "bid") return "border-violet-500/40 bg-violet-500/10 text-violet-300";
   if (value === "bought" || value === "minted" || value === "pack_opened") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
   if (value === "sold" || value === "transferred" || value === "delisted") return "border-blue-500/40 bg-blue-500/10 text-blue-300";
   return "border-border bg-muted text-muted-foreground";
@@ -257,7 +265,7 @@ function providerLabel(value: string | null | undefined) {
 
 function txUrl(value: string | null | undefined) {
   if (value?.startsWith("TEST_SIGNATURE")) return null;
-  return value ? `https://solscan.io/tx/${value}` : null;
+  return value ? `https://orbmarkets.io/tx/${value}` : null;
 }
 
 function orbAddressUrl(value: string | null | undefined) {
@@ -298,6 +306,8 @@ export function NftListPage() {
   const [stats, setStats] = useState<NftListStats>({
     listedTotal: 0,
     listedLast10Minutes: 0,
+    bidTotal: 0,
+    bidLast10Minutes: 0,
     verifiedSalesTotal: 0,
     verifiedSalesLast10Minutes: 0,
     transferredTotal: 0,
@@ -322,11 +332,12 @@ export function NftListPage() {
   const [sort, setSort] = useState("checked_desc");
   const [includeOther, setIncludeOther] = useState(false);
   const [includeUnknown, setIncludeUnknown] = useState(false);
+  const [withoutBid, setWithoutBid] = useState(false);
   const [missingImage, setMissingImage] = useState(false);
 
   useEffect(() => {
     setPage(1);
-  }, [category, assetType, sourceCollection, status, search, sort, includeOther, includeUnknown, missingImage]);
+  }, [category, assetType, sourceCollection, status, search, sort, includeOther, includeUnknown, withoutBid, missingImage]);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({
@@ -335,6 +346,7 @@ export function NftListPage() {
       sort,
       includeOther: String(includeOther),
       includeUnknown: String(includeUnknown),
+      withoutBid: String(withoutBid),
       includeStaging: "false",
       missingImage: String(missingImage),
     });
@@ -346,7 +358,7 @@ export function NftListPage() {
     if (search.trim()) params.set("search", search.trim());
 
     return params.toString();
-  }, [assetType, category, includeOther, includeUnknown, limit, missingImage, page, search, sort, sourceCollection, status]);
+  }, [assetType, category, includeOther, includeUnknown, limit, missingImage, page, search, sort, sourceCollection, status, withoutBid]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -373,6 +385,8 @@ export function NftListPage() {
         setStats({
           listedTotal: payload.listedTotal ?? 0,
           listedLast10Minutes: payload.listedLast10Minutes ?? 0,
+          bidTotal: payload.bidTotal ?? 0,
+          bidLast10Minutes: payload.bidLast10Minutes ?? 0,
           verifiedSalesTotal: payload.verifiedSalesTotal ?? 0,
           verifiedSalesLast10Minutes: payload.verifiedSalesLast10Minutes ?? 0,
           transferredTotal: payload.transferredTotal ?? 0,
@@ -517,6 +531,12 @@ export function NftListPage() {
             <input type="checkbox" checked={includeUnknown} onChange={(event) => setIncludeUnknown(event.target.checked)} className="h-4 w-4 accent-primary" />
           </label>
 
+          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
+            <span>Without bid</span>
+            <input type="checkbox" checked={withoutBid} onChange={(event) => setWithoutBid(event.target.checked)} className="h-4 w-4 accent-primary" />
+          </label>
+        </div>
+        <div className="grid md:grid-cols-4 gap-3">
           <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
             <span>Missing image only</span>
             <input type="checkbox" checked={missingImage} onChange={(event) => setMissingImage(event.target.checked)} className="h-4 w-4 accent-primary" />
@@ -723,6 +743,12 @@ function MarketActivityCard({ loading, stats }: { loading: boolean; stats: NftLi
       toneClass: activityClass("listed"),
     },
     {
+      label: "MakeOffer",
+      total: stats.bidTotal,
+      recent: stats.bidLast10Minutes,
+      toneClass: activityClass("make_offer"),
+    },
+    {
       label: "Verified Sales",
       total: stats.verifiedSalesTotal,
       recent: stats.verifiedSalesLast10Minutes,
@@ -743,25 +769,27 @@ function MarketActivityCard({ loading, stats }: { loading: boolean; stats: NftLi
   ];
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 sm:col-span-2">
+    <div className="rounded-lg border border-border bg-card p-3 sm:col-span-2">
       <div className="flex items-start justify-between gap-3">
         <div className="text-xs text-muted-foreground">Market & NFT Activity</div>
         <div className="text-xs text-muted-foreground">Last 10 minutes</div>
       </div>
 
-      <div className="mt-4 divide-y divide-border/60">
+      <div className="mt-3 grid grid-cols-3 gap-1.5 lg:grid-cols-5">
         {rows.map((row) => (
-          <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 py-3 first:pt-0 last:pb-0">
+          <div key={row.label} className="rounded-md border border-border/70 bg-surface px-2.5 py-1.5">
             <div className="min-w-0">
-              <span className={`inline-flex rounded border px-2 py-1 text-xs ${row.toneClass}`}>
+              <span className={`inline-flex max-w-full rounded border px-1.5 py-0.5 text-[10px] leading-4 ${row.toneClass}`}>
                 {row.label}
               </span>
             </div>
-            <div className="text-right text-lg font-semibold font-mono tabular-nums">
-              {loading ? "..." : row.total.toLocaleString("en-US")}
-            </div>
-            <div className="text-right text-sm text-muted-foreground font-mono tabular-nums min-w-[2ch]">
-              {loading ? "..." : row.recent.toLocaleString("en-US")}
+            <div className="mt-1.5 flex items-end justify-between gap-2">
+              <div className="font-mono text-base font-semibold leading-none tabular-nums">
+                {loading ? "..." : row.total.toLocaleString("en-US")}
+              </div>
+              <div className="font-mono text-xs text-muted-foreground tabular-nums">
+                {loading ? "..." : row.recent.toLocaleString("en-US")}
+              </div>
             </div>
           </div>
         ))}

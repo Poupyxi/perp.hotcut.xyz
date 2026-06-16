@@ -172,7 +172,7 @@ function listingPrice(sale: VerifiedSale) {
 
 function txUrl(value: string | null | undefined) {
   if (value?.startsWith("TEST_SIGNATURE")) return null;
-  return value ? `https://solscan.io/tx/${value}` : null;
+  return value ? `https://orbmarkets.io/tx/${value}` : null;
 }
 
 function NftImage({ src, name }: { src: string | null; name: string | null }) {

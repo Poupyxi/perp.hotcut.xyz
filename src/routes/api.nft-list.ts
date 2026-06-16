@@ -84,6 +84,7 @@ export const Route = createFileRoute("/api/nft-list")({
         const status = url.searchParams.get("status");
         const includeOther = optionalBoolean(url.searchParams.get("includeOther"), false);
         const includeUnknown = optionalBoolean(url.searchParams.get("includeUnknown"), false);
+        const withoutBid = optionalBoolean(url.searchParams.get("withoutBid"), false);
         const includeStaging = optionalBoolean(url.searchParams.get("includeStaging"), false);
         const missingImage = optionalBoolean(url.searchParams.get("missingImage"), false);
         const sort = normalizeSort(url.searchParams.get("sort"));
@@ -154,6 +155,10 @@ export const Route = createFileRoute("/api/nft-list")({
           where.push("(image IS NULL OR image = '')");
         }
 
+        if (withoutBid) {
+          where.push("COALESCE(last_activity_type, 'unknown') NOT IN ('bid', 'make_offer')");
+        }
+
         if (search) {
           where.push(`(
             name LIKE ?
@@ -201,6 +206,22 @@ export const Route = createFileRoute("/api/nft-list")({
             AND (COALESCE(current_state, current_status, 'unknown') = 'listed' OR is_listed = 1)
             AND listing_updated_at IS NOT NULL
             AND listing_updated_at >= ?
+        `).get(...params, last10MinutesIso) as Record<string, unknown>);
+
+        const bidTotal = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_activity_type IN ('bid', 'make_offer')
+        `).get(...params) as Record<string, unknown>);
+
+        const bidLast10Minutes = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND last_activity_type IN ('bid', 'make_offer')
+            AND last_activity_at IS NOT NULL
+            AND last_activity_at >= ?
         `).get(...params, last10MinutesIso) as Record<string, unknown>);
 
         const verifiedSalesTotal = countValue(db.prepare(`
@@ -378,6 +399,8 @@ export const Route = createFileRoute("/api/nft-list")({
             publicGroupCounts,
             listedTotal,
             listedLast10Minutes,
+            bidTotal,
+            bidLast10Minutes,
             verifiedSalesTotal,
             verifiedSalesLast10Minutes,
             transferredTotal,

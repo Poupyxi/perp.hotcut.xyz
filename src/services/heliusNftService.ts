@@ -2,6 +2,7 @@ import type { CollectionIngestionResult, NormalizedNftAsset, TrackedNftRow } fro
 import { readNftDb, saveCollectionAssets, saveNormalizedAsset, updateQueueState } from "./nftStore";
 import { filterAndSortTrackedAssets, getTrackedMarketCategory } from "./trackedMarketCategories";
 import { findAllowedNftCollection } from "./trackedNftsConfig";
+import { fetchWithHeliusKey, hasHeliusApiKey, isHeliusKeysUnavailableError } from "./heliusApiKeyRotation";
 
 const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/";
 const DEFAULT_COLLECTION_LIMIT = 1000;
@@ -91,8 +92,7 @@ export class HeliusNftError extends Error {
 }
 
 async function heliusRpc(method: string, params: unknown, id: string): Promise<unknown> {
-  const apiKey = env().HELIUS_API_KEY;
-  if (!apiKey) {
+  if (!hasHeliusApiKey()) {
     console.log("[NFT INGESTION] Missing HELIUS_API_KEY");
     throw new HeliusNftError("Missing HELIUS_API_KEY");
   }
@@ -100,11 +100,15 @@ async function heliusRpc(method: string, params: unknown, id: string): Promise<u
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
-    const response = await fetch(`${HELIUS_RPC_URL}?api-key=${apiKey}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      signal: controller.signal,
+    const response = await fetchWithHeliusKey({
+      label: `nft-ingestion:${method}`,
+      endpoint: HELIUS_RPC_URL,
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+        signal: controller.signal,
+      },
     });
 
     if (response.status === 429) throw new HeliusNftError("Helius rate limit hit", { status: 429, rateLimited: true });
@@ -116,6 +120,7 @@ async function heliusRpc(method: string, params: unknown, id: string): Promise<u
     return payload.result;
   } catch (error) {
     if (error instanceof HeliusNftError) throw error;
+    if (isHeliusKeysUnavailableError(error)) throw new HeliusNftError(error.message, { status: 429, rateLimited: true });
     if (error instanceof Error && error.name === "AbortError") throw new HeliusNftError("Helius request timed out");
     throw new HeliusNftError(error instanceof Error ? error.message : "Helius network error");
   } finally {

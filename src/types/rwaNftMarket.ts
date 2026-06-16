@@ -2,6 +2,7 @@ export type RwaNftMarketEventType =
   | "LISTED"
   | "SALE"
   | "DELISTED"
+  | "BID"
   | "PRICE_UPDATED"
   | "TRANSFER"
   | "OWNER_CHANGED";
@@ -29,6 +30,8 @@ export type NFTMetadataStatus = "complete" | "partial" | "missing" | "error";
 export type NFTLastActivityType =
   | "minted"
   | "listed"
+  | "make_offer"
+  | "bid"
   | "delisted"
   | "bought"
   | "sold"
@@ -36,7 +39,7 @@ export type NFTLastActivityType =
   | "pack_opened"
   | "unknown";
 
-export type NFTMarketActivityType = "listed" | "sold" | "delisted" | "transfer" | "minted" | "unknown";
+export type NFTMarketActivityType = "listed" | "make_offer" | "bid" | "sold" | "delisted" | "transfer" | "minted" | "unknown";
 
 export type NFTMarketActivity = {
   provider: string;

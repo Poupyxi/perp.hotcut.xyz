@@ -43,8 +43,9 @@ function recordArray(value: unknown): Record<string, unknown>[] {
 function detectEventType(tx: Record<string, unknown>): RwaNftMarketEventType | null {
   const typeText = String(tx.type ?? tx.transactionType ?? tx.description ?? "").toUpperCase();
   if (typeText.includes("NFT_SALE") || typeText.includes("SALE")) return "SALE";
-  if (typeText.includes("LIST")) return "LISTED";
+  if (typeText.includes("BID") || typeText.includes("OFFER")) return "BID";
   if (typeText.includes("DELIST")) return "DELISTED";
+  if (typeText.includes("LIST")) return "LISTED";
   if (typeText.includes("PRICE")) return "PRICE_UPDATED";
   if (typeText.includes("TRANSFER")) return "TRANSFER";
   return null;

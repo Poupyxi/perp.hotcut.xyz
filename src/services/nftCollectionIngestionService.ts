@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { ALLOWED_RWA_NFT_CATEGORIES, detectRwaNftCategory, isAllowedRwaNftCategory } from "./nftCategoryService";
 import { detectCollectibleAssetType, publicGroupForAssetType, type RwaCollectibleAssetType, type RwaCollectiblePublicGroup } from "./nftAssetTypeService";
 import { getNftDb, nftDatabasePath, shouldStoreRawHeliusJson, sqliteBool, stringifyJson } from "./nftSqliteDb";
+import { fetchWithHeliusKey, hasHeliusApiKey } from "./heliusApiKeyRotation";
 import { getTrackedMarketCategory, trackedMarketLabel } from "./trackedMarketCategories";
 import { getAllowedNftCollections, type TargetNftCollectionConfig } from "./trackedNftsConfig";
 
@@ -304,23 +305,26 @@ export function normalizeNftUniverseAsset(raw: unknown, collection: TargetNftCol
 }
 
 export async function heliusAssetsPage(collectionAddress: string, page: number, limit: number): Promise<HeliusPage> {
-  const apiKey = env().HELIUS_API_KEY;
-  if (!apiKey) throw new Error("Missing HELIUS_API_KEY");
+  if (!hasHeliusApiKey()) throw new Error("Missing HELIUS_API_KEY");
 
-  const response = await fetch(`${HELIUS_RPC_URL}?api-key=${apiKey}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "ingest-allowed-collections",
-      method: "getAssetsByGroup",
-      params: {
-        groupKey: "collection",
-        groupValue: collectionAddress,
-        page,
-        limit,
-      },
-    }),
+  const response = await fetchWithHeliusKey({
+    label: "collection-ingestion:getAssetsByGroup",
+    endpoint: HELIUS_RPC_URL,
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "ingest-allowed-collections",
+        method: "getAssetsByGroup",
+        params: {
+          groupKey: "collection",
+          groupValue: collectionAddress,
+          page,
+          limit,
+        },
+      }),
+    },
   });
 
   if (response.status === 429) throw new Error("Helius rate limit hit");

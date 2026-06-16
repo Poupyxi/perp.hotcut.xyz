@@ -1,8 +1,7 @@
 import type { DiscoveredNFTMint, ProviderMintDiscoveryConnector } from "@/types/rwaNftMarket";
 import { heliusAssetsPage } from "./nftCollectionIngestionService";
+import { hasHeliusApiKey } from "./heliusApiKeyRotation";
 import { providerApiEnv } from "./nftScannerConfig";
-
-type RuntimeEnv = Record<string, string | undefined>;
 
 export type MintDiscoveryProviderStatusCode =
   | "live"
@@ -20,10 +19,6 @@ export type MintDiscoveryProviderStatus = {
   message: string;
   checkedAt: string;
 };
-
-function env(): RuntimeEnv {
-  return (globalThis as unknown as { process?: { env?: RuntimeEnv } }).process?.env ?? {};
-}
 
 function status(providerId: string, code: MintDiscoveryProviderStatusCode, message: string): MintDiscoveryProviderStatus {
   return {
@@ -79,13 +74,13 @@ class HeliusMintDiscoveryConnector extends BaseMintDiscoveryConnector {
   providerId = "helius";
 
   getStatus() {
-    return env().HELIUS_API_KEY
+    return hasHeliusApiKey()
       ? status(this.providerId, "live", "Helius DAS is configured for allowlisted collection mint discovery.")
       : status(this.providerId, "needs_api_key", "Helius discovery requires HELIUS_API_KEY.");
   }
 
   async discoverMints(params: { collectionSlug: string; market: string; limit?: number; cursor?: string }): Promise<DiscoveredNFTMint[]> {
-    if (!env().HELIUS_API_KEY) return [];
+    if (!hasHeliusApiKey()) return [];
     const limit = Math.min(Math.max(Math.trunc(params.limit ?? 500), 1), 1000);
     const page = params.cursor ? Math.max(Number(params.cursor), 1) : 1;
     const result = await heliusAssetsPage(params.collectionSlug, page, limit);

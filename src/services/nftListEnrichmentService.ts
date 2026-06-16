@@ -8,6 +8,7 @@ import { getNftDb, shouldStoreRawHeliusJson, sqliteBool, stringifyJson } from ".
 import { readNftScannerConfig } from "./nftScannerConfig";
 import { saveProviderScanStatus } from "./nftScannerStatusService";
 import { saveRwaNftMarketEvent } from "./rwaNftMarketEventService";
+import { fetchWithHeliusKey, hasHeliusApiKey } from "./heliusApiKeyRotation";
 
 type RuntimeEnv = Record<string, string | undefined>;
 type SqlRow = Record<string, unknown>;
@@ -58,6 +59,7 @@ export type EnrichNFTListResult = {
 
 const HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/";
 const HELIUS_ENHANCED_TX_URL = "https://api.helius.xyz/v0/transactions/";
+const COLLECTOR_CRYPT_PROGRAM_ID = "CcmRKTuZCGJBWQwMHvDYApBRvSZNHqGJXkznqpDTSQUr";
 function env(): RuntimeEnv {
   return (globalThis as unknown as { process?: { env?: RuntimeEnv } }).process?.env ?? {};
 }
@@ -235,12 +237,15 @@ function mergePreviewRow(baseRow: SqlRow | undefined, next: Partial<Record<strin
 }
 
 async function heliusRpc(method: string, params: unknown) {
-  const apiKey = env().HELIUS_API_KEY;
-  if (!apiKey) throw new Error("Missing HELIUS_API_KEY");
-  const response = await fetch(`${HELIUS_RPC_URL}?api-key=${apiKey}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
+  if (!hasHeliusApiKey()) throw new Error("Missing HELIUS_API_KEY");
+  const response = await fetchWithHeliusKey({
+    label: `nft-list:${method}`,
+    endpoint: HELIUS_RPC_URL,
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: method, method, params }),
+    },
   });
   const payload = await response.json() as { result?: unknown; error?: { message?: string } };
   if (!response.ok || payload.error) throw new Error(payload.error?.message ?? `Helius ${method} failed: ${response.status}`);
@@ -252,17 +257,71 @@ async function recentSignaturesForMint(mint: string, limit = 8) {
   return Array.isArray(result) ? result.map(asRecord) : [];
 }
 
+async function rpcTransactionRecords(signatures: string[]) {
+  const records: Record<string, unknown>[] = [];
+  for (const signature of signatures) {
+    try {
+      const result = asRecord(await heliusRpc("getTransaction", [
+        signature,
+        { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 },
+      ]));
+      const transaction = asRecord(result.transaction);
+      const message = asRecord(transaction.message);
+      const meta = asRecord(result.meta);
+      const accountKeys = (Array.isArray(message.accountKeys) ? message.accountKeys : []).map((account) => {
+        const row = asRecord(account);
+        return {
+          account: asString(row.pubkey) ?? (typeof account === "string" ? account : null),
+        };
+      }).filter((account) => account.account);
+      const instructions = (Array.isArray(message.instructions) ? message.instructions : []).map((instruction) => {
+        const row = asRecord(instruction);
+        return {
+          programId: asString(row.programId) ?? asString(row.program),
+          programName: asString(row.program),
+        };
+      });
+      records.push({
+        signature,
+        transactionSignature: signature,
+        timestamp: result.blockTime,
+        instructions,
+        accountData: accountKeys,
+        logMessages: Array.isArray(meta.logMessages) ? meta.logMessages : [],
+        meta,
+      });
+    } catch (error) {
+      console.log(`[NFT TX LOGS] ${signature} unavailable: ${error instanceof Error ? error.message : "request failed"}`);
+    }
+  }
+  return records;
+}
+
 async function enhancedTransactions(signatures: string[]) {
-  const apiKey = env().HELIUS_API_KEY;
-  if (!apiKey || signatures.length === 0) return [];
-  const response = await fetch(`${HELIUS_ENHANCED_TX_URL}?api-key=${apiKey}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ transactions: signatures }),
+  if (!hasHeliusApiKey() || signatures.length === 0) return [];
+  const response = await fetchWithHeliusKey({
+    label: "nft-list:enhanced-transactions",
+    endpoint: HELIUS_ENHANCED_TX_URL,
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ transactions: signatures }),
+    },
   });
-  if (!response.ok) throw new Error(`Helius Enhanced Transactions failed: ${response.status}`);
+  if (!response.ok) {
+    const fallbackRecords = await rpcTransactionRecords(signatures);
+    if (fallbackRecords.length) return fallbackRecords;
+    throw new Error(`Helius Enhanced Transactions failed: ${response.status}`);
+  }
   const payload = await response.json() as unknown;
-  return Array.isArray(payload) ? payload.map(asRecord) : [];
+  const enhancedRecords = Array.isArray(payload) ? payload.map(asRecord) : [];
+  const rpcRecords = await rpcTransactionRecords(signatures);
+  const rpcBySignature = new Map(rpcRecords.map((record) => [txSignature(record), record]));
+  return enhancedRecords.map((record) => {
+    const signature = txSignature(record);
+    const rpcRecord = signature ? rpcBySignature.get(signature) : null;
+    return rpcRecord ? { ...rpcRecord, ...record, logMessages: rpcRecord.logMessages, meta: rpcRecord.meta } : record;
+  });
 }
 
 function timestampFromTx(tx: Record<string, unknown>) {
@@ -280,6 +339,9 @@ function textFromTx(tx: Record<string, unknown>) {
     tx.type,
     tx.source,
     tx.description,
+    ...(Array.isArray(tx.logs) ? tx.logs : []),
+    ...(Array.isArray(tx.logMessages) ? tx.logMessages : []),
+    ...(Array.isArray(asRecord(tx.meta).logMessages) ? asRecord(tx.meta).logMessages : []),
     asRecord(tx.events).nft ? JSON.stringify(asRecord(tx.events).nft) : "",
   ].join(" ").toLowerCase();
 }
@@ -496,6 +558,42 @@ function inferMarketplacePurchase(tx: Record<string, unknown>, owner: string | n
   };
 }
 
+function hasCollectorCryptProgram(tx: Record<string, unknown>) {
+  return instructionPrograms(tx).includes(COLLECTOR_CRYPT_PROGRAM_ID) || accountDataAccounts(tx).includes(COLLECTOR_CRYPT_PROGRAM_ID);
+}
+
+function hasOfferDeposit(tx: Record<string, unknown>, owner: string | null) {
+  const feePayer = asString(tx.feePayer);
+  const payer = owner ?? feePayer;
+  return (Array.isArray(tx.nativeTransfers) ? tx.nativeTransfers : [])
+    .map(asRecord)
+    .some((transfer) => {
+      const from = asString(transfer.fromUserAccount) ?? asString(transfer.fromAddress);
+      const to = asString(transfer.toUserAccount) ?? asString(transfer.toAddress);
+      const amount = numberFromUnknown(transfer.amount) ?? 0;
+      return Boolean(from && to && from !== to && (!payer || from === payer) && amount > 100_000);
+    });
+}
+
+function detectMakeOffer(tx: Record<string, unknown>, owner: string | null) {
+  const text = textFromTx(tx);
+  if (text.includes("makeoffer") || text.includes("make offer") || text.includes("instruction: makeoffer")) {
+    return {
+      matched: true,
+      reason: "Collector Crypt MakeOffer instruction detected in transaction logs",
+    };
+  }
+
+  if (hasCollectorCryptProgram(tx) && hasOfferDeposit(tx, owner)) {
+    return {
+      matched: true,
+      reason: "Collector Crypt offer-like transaction detected from program id and SOL deposit",
+    };
+  }
+
+  return { matched: false, reason: null };
+}
+
 function inferCoreTransferReceiver(tx: Record<string, unknown>, mint: string, owner: string | null, collectionAddress: string | null) {
   const feePayer = asString(tx.feePayer);
   const instructions = Array.isArray(tx.instructions) ? tx.instructions.map(asRecord) : [];
@@ -573,6 +671,17 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
     };
   }
 
+  const makeOffer = detectMakeOffer(tx, owner);
+  if (makeOffer.matched) {
+    return {
+      type: "make_offer",
+      state: owner ? "owned" : "unknown",
+      sale: null,
+      reason: makeOffer.reason ?? "Collector Crypt MakeOffer transaction detected",
+      debug: commonDebug,
+    };
+  }
+
   const inferredPurchase = inferMarketplacePurchase(tx, owner);
   if (inferredPurchase) {
     return {
@@ -630,6 +739,15 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       state: "unlisted",
       sale: null,
       reason: "transaction text included delist/cancel listing wording",
+      debug: commonDebug,
+    };
+  }
+  if (text.includes("bid") || text.includes("offer")) {
+    return {
+      type: "bid",
+      state: owner ? "owned" : "unknown",
+      sale: null,
+      reason: "transaction text included bid/offer wording",
       debug: commonDebug,
     };
   }
@@ -932,10 +1050,10 @@ function statusFromRun(input: {
   return {
     provider: "helius",
     scanType: "market_state",
-    status: env().HELIUS_API_KEY ? input.errors ? "error" : "live" : "needs_api_key",
+    status: hasHeliusApiKey() ? input.errors ? "error" : "live" : "needs_api_key",
     lastRunAt: input.startedAt,
-    lastSuccessAt: input.errors || !env().HELIUS_API_KEY ? null : nowIso(),
-    lastError: !env().HELIUS_API_KEY ? "Missing HELIUS_API_KEY" : input.errors ? `${input.errors} NFT(s) failed` : null,
+    lastSuccessAt: input.errors || !hasHeliusApiKey() ? null : nowIso(),
+    lastError: !hasHeliusApiKey() ? "Missing HELIUS_API_KEY" : input.errors ? `${input.errors} NFT(s) failed` : null,
     itemsChecked: input.checked,
     itemsFound: input.found,
     itemsStored: input.stored,
@@ -1467,6 +1585,7 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     const message = error instanceof Error ? error.message : "NFT provider unavailable";
     console.log(`[NFT LOOKUP] Helius failed: ${message}`);
     if (row) {
+      console.log("[HELIUS ROTATION] cache fallback used=true");
       return {
         nft: rowToNftDto(row),
         cacheHit: true,
@@ -1676,7 +1795,7 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
     lastActivitiesUpdated,
     verifiedSalesDetected,
     verifiedSalesStored,
-    providersUsed: env().HELIUS_API_KEY ? ["helius"] : [],
+    providersUsed: hasHeliusApiKey() ? ["helius"] : [],
     errors,
     changes: changes.slice(0, 50),
     providerStatuses: [status],
