@@ -62,7 +62,7 @@ const CATEGORY_OPTIONS = [
 const SOURCE_OPTIONS = [
   ["all", "All sources"],
   ["helius", "Helius verified"],
-  ["magiceden", "Magic Eden verified"],
+  ["magiceden", "Provider not connected"],
   ["tensor", "Tensor verified"],
   ["discord", "Discord verified"],
   ["manual", "Manual verified"],
@@ -98,7 +98,7 @@ function short(value: string | null | undefined) {
 
 function sourceLabel(source: string) {
   if (source === "helius_enhanced_tx" || source === "helius_webhook") return "Helius verified";
-  if (source === "magiceden" || source === "magic-eden") return "Magic Eden verified";
+  if (source === "magiceden" || source === "magic-eden" || source === "collector-crypt" || source === "phygitals") return "Provider not connected";
   if (source === "tensor") return "Tensor verified";
   if (source === "manual") return "Manual verified";
   if (source === "discord") return "Discord verified";
@@ -111,10 +111,8 @@ function marketplaceLabel(value: string | null) {
 
   const normalized = value.toLowerCase();
 
-  if (normalized === "magic_eden" || normalized === "magiceden") return "Magic Eden";
+  if (normalized === "magic_eden" || normalized === "magiceden" || normalized === "collector_crypt" || normalized === "phygitals") return "Provider not connected";
   if (normalized === "tensor") return "Tensor";
-  if (normalized === "collector_crypt" || normalized === "collectorcrypt") return "Collector Crypt";
-  if (normalized === "phygitals" || normalized === "phygital") return "Phygitals";
   if (normalized === "ebay") return "eBay";
   if (normalized === "manual") return "Manual";
 
@@ -126,10 +124,8 @@ function marketplaceLogo(value: string | null) {
 
   const normalized = value.toLowerCase();
 
-  if (normalized === "magic_eden" || normalized === "magiceden") return "/magiceden.png";
+  if (normalized === "magic_eden" || normalized === "magiceden" || normalized === "collector_crypt" || normalized === "phygitals") return null;
   if (normalized === "tensor") return "/tensor.png";
-  if (normalized === "collector_crypt" || normalized === "collectorcrypt") return "/collectorcrypt.png";
-  if (normalized === "phygitals" || normalized === "phygital") return "/phygitals.png";
   if (normalized === "ebay") return "/ebay.png";
 
   return null;
@@ -348,7 +344,6 @@ export function VerifiedSalesPage() {
           <select value={provider} onChange={(event) => setProvider(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
             <option value="all">All providers</option>
             <option value="helius">Helius</option>
-            <option value="magiceden">Magic Eden</option>
             <option value="tensor">Tensor</option>
             <option value="manual">Manual</option>
           </select>

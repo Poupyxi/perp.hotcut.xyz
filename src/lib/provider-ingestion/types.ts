@@ -1,6 +1,6 @@
 export type ProviderId = "magic-eden" | "tensor" | "phygitals" | "collector-crypt";
 
-export type ProviderStatusCode = "live" | "unavailable" | "needs_api_key" | "needs_endpoint" | "error";
+export type ProviderStatusCode = "live" | "unavailable" | "disabled" | "needs_api_key" | "needs_endpoint" | "error";
 export type ValidationStatus = "unverified" | "verified" | "failed";
 
 export type NormalizedSale = {

@@ -9,6 +9,7 @@ type RuntimeEnv = Record<string, string | undefined>;
 
 export type MarketActivityProviderStatusCode =
   | "live"
+  | "disabled"
   | "prepared"
   | "unavailable"
   | "needs_api_key"
@@ -59,10 +60,10 @@ class MagicEdenMarketActivityConnector extends BaseConnector {
   providerId = "magic-eden";
 
   getStatus() {
-    const configured = Boolean(env().MAGIC_EDEN_API_KEY || env().MAGIC_EDEN_API_URL);
+    const configured = Boolean(env().MAGIC_EDEN_API_KEY || env().MAGIC_EDEN_API_URL) && (env().MAGIC_EDEN_ENABLED ?? "false") === "true";
     return configured
       ? status(this.providerId, "prepared", "Magic Eden is configured, but per-mint activity polling is not enabled until collection/listing endpoints are mapped.")
-      : status(this.providerId, "needs_endpoint", "Magic Eden requires configured marketplace activity/listing endpoints before live polling.");
+      : status(this.providerId, "disabled", "Provider not connected.");
   }
 }
 
@@ -100,9 +101,9 @@ class PhygitalsMarketActivityConnector extends BaseConnector {
   providerId = "phygitals";
 
   getStatus() {
-    return env().PHYGITALS_API_URL
+    return (env().PHYGITALS_ENABLED ?? "false") === "true" && env().PHYGITALS_API_URL
       ? status(this.providerId, "prepared", "Phygitals endpoint is configured; sale/listing mapping can be enabled once response fields are confirmed.")
-      : status(this.providerId, "needs_endpoint", "Phygitals requires PHYGITALS_API_URL and must not use protected endpoints.");
+      : status(this.providerId, "disabled", "Provider not connected.");
   }
 }
 
@@ -110,9 +111,9 @@ class CollectorCryptMarketActivityConnector extends BaseConnector {
   providerId = "collector-crypt";
 
   getStatus() {
-    return env().COLLECTOR_CRYPT_API_URL
+    return (env().COLLECTOR_CRYPT_ENABLED ?? "false") === "true" && env().COLLECTOR_CRYPT_API_URL
       ? status(this.providerId, "prepared", "Collector Crypt endpoint is configured; only sales/fills endpoints should be used as verified sales.")
-      : status(this.providerId, "needs_endpoint", "Collector Crypt needs an official sales/fills endpoint before marketplace activity polling.");
+      : status(this.providerId, "disabled", "Provider not connected.");
   }
 }
 

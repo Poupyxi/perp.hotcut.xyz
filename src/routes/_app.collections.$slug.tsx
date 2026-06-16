@@ -37,8 +37,8 @@ type AssetRow = {
 };
 
 const providerLabels: Record<MarketProvider, string> = {
-  "collector-crypt": "Collector Crypt",
-  "magic-eden": "Magic Eden",
+  "collector-crypt": "Provider not connected",
+  "magic-eden": "Provider not connected",
   tensor: "Tensor",
   solscan: "Solscan",
   helius: "Helius",
@@ -240,7 +240,7 @@ function ProviderStatusPanel({ statuses, loading, error, live }: { statuses: Pro
 
 function ProviderPill({ status }: { status: ProviderStatus }) {
   const label = providerLabels[status.provider] ?? status.provider;
-  const state = status.ok ? "Live" : status.enabled ? "Configured" : "Fallback";
+  const state = status.ok ? "Live" : status.enabled ? "Configured" : "Not connected";
   const dotClass = status.ok ? "bg-success" : status.enabled ? "bg-primary" : "bg-muted-foreground";
 
   return (

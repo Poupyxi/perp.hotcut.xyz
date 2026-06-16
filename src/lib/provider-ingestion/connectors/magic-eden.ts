@@ -2,6 +2,10 @@ import type { FetchSalesParams, NormalizedSale, ProviderSalesConnector, Provider
 import { asNumber, asRecord, asString, fetchJson, isWithinWindow, nowStatus, rowsFromPayload, toIsoDate } from "../utils";
 import { getIngestionEnv } from "../config";
 
+function isEnabled(env: Record<string, string | undefined>) {
+  return (env.MAGIC_EDEN_ENABLED ?? "false") === "true";
+}
+
 function isExecutedSale(row: Record<string, unknown>): boolean {
   const type = `${asString(row.type) ?? asString(row.kind) ?? ""}`.toLowerCase();
   return ["buy", "buynow", "buy_now", "sale", "sold", "accept_bid"].some((saleType) => type.includes(saleType));
@@ -49,7 +53,7 @@ function normalizeMagicEdenSale(rowValue: unknown, market: string, symbol: strin
 
 export class MagicEdenSalesConnector implements ProviderSalesConnector {
   providerId = "magic-eden" as const;
-  private status: ProviderSalesStatus = nowStatus(this.providerId, "unavailable", "Magic Eden has not run yet.");
+  private status: ProviderSalesStatus = nowStatus(this.providerId, "disabled", "Provider not connected.");
 
   getStatus() {
     return this.status;
@@ -57,6 +61,10 @@ export class MagicEdenSalesConnector implements ProviderSalesConnector {
 
   async fetchSales(params: FetchSalesParams): Promise<NormalizedSale[]> {
     const env = getIngestionEnv();
+    if (!isEnabled(env)) {
+      this.status = nowStatus(this.providerId, "disabled", "Provider not connected.");
+      return [];
+    }
     const headers: Record<string, string> = { accept: "application/json" };
     if (env.MAGIC_EDEN_API_KEY) headers.Authorization = `Bearer ${env.MAGIC_EDEN_API_KEY}`;
 

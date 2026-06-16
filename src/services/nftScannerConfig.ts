@@ -107,11 +107,15 @@ export function scannerWriteAllowed(requestedDryRun?: boolean | null) {
 export function providerApiEnv() {
   return {
     heliusConfigured: Boolean(env().HELIUS_API_KEY),
+    shyftConfigured: Boolean(env().SHYFT_API_KEY),
     solscanConfigured: Boolean(env().SOLSCAN_API_KEY),
-    magicEdenConfigured: Boolean(env().MAGIC_EDEN_API_KEY || env().MAGIC_EDEN_API_URL),
+    magicEdenConfigured: boolEnv("MAGIC_EDEN_ENABLED", false) && Boolean(env().MAGIC_EDEN_API_KEY || env().MAGIC_EDEN_API_URL),
+    magicEdenEnabled: boolEnv("MAGIC_EDEN_ENABLED", false),
     tensorConfigured: Boolean(env().TENSOR_API_KEY),
-    phygitalsConfigured: Boolean(env().PHYGITALS_API_URL),
-    collectorCryptConfigured: Boolean(env().COLLECTOR_CRYPT_API_URL),
+    phygitalsConfigured: boolEnv("PHYGITALS_ENABLED", false) && Boolean(env().PHYGITALS_API_URL),
+    phygitalsEnabled: boolEnv("PHYGITALS_ENABLED", false),
+    collectorCryptConfigured: boolEnv("COLLECTOR_CRYPT_ENABLED", false) && Boolean(env().COLLECTOR_CRYPT_API_URL),
+    collectorCryptEnabled: boolEnv("COLLECTOR_CRYPT_ENABLED", false),
     beezieConfigured: Boolean(env().BEEZIE_API_URL || env().BEEZIE_CHAIN_IDS || env().BEEZIE_PROGRAM_IDS),
   };
 }

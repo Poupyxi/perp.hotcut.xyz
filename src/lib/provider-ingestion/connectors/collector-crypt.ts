@@ -3,9 +3,13 @@ import type { FetchSalesParams, NormalizedSale, ProviderSalesConnector, Provider
 import { fetchJson, isWithinWindow, nowStatus } from "../utils";
 import { normalizeGenericPayload } from "./generic-json";
 
+function isEnabled(env: Record<string, string | undefined>) {
+  return (env.COLLECTOR_CRYPT_ENABLED ?? "false") === "true";
+}
+
 export class CollectorCryptSalesConnector implements ProviderSalesConnector {
   providerId = "collector-crypt" as const;
-  private status: ProviderSalesStatus = nowStatus(this.providerId, "unavailable", "COLLECTOR_CRYPT_API_URL is not configured.");
+  private status: ProviderSalesStatus = nowStatus(this.providerId, "disabled", "Provider not connected.");
 
   getStatus() {
     return this.status;
@@ -13,8 +17,8 @@ export class CollectorCryptSalesConnector implements ProviderSalesConnector {
 
   async fetchSales(params: FetchSalesParams): Promise<NormalizedSale[]> {
     const env = getIngestionEnv();
-    if (!env.COLLECTOR_CRYPT_API_URL) {
-      this.status = nowStatus(this.providerId, "unavailable", "COLLECTOR_CRYPT_API_URL is not configured.");
+    if (!isEnabled(env) || !env.COLLECTOR_CRYPT_API_URL) {
+      this.status = nowStatus(this.providerId, "disabled", "Provider not connected.");
       return [];
     }
     if (!env.COLLECTOR_CRYPT_SALES_PATH) {

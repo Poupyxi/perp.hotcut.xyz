@@ -5,6 +5,7 @@ import { providerApiEnv } from "./nftScannerConfig";
 
 export type MintDiscoveryProviderStatusCode =
   | "live"
+  | "disabled"
   | "prepared"
   | "unavailable"
   | "needs_api_key"
@@ -94,9 +95,10 @@ class MagicEdenMintDiscoveryConnector extends BaseMintDiscoveryConnector {
   providerId = "magic-eden";
 
   getStatus() {
-    return providerApiEnv().magicEdenConfigured
+    const provider = providerApiEnv();
+    return provider.magicEdenEnabled
       ? status(this.providerId, "prepared", "Magic Eden is configured; collection symbol discovery endpoint mapping is still required.")
-      : status(this.providerId, "needs_endpoint", "Magic Eden discovery needs configured collection symbols and public API endpoint mapping.");
+      : status(this.providerId, "disabled", "Provider not connected.");
   }
 }
 
@@ -114,9 +116,9 @@ class PhygitalsMintDiscoveryConnector extends BaseMintDiscoveryConnector {
   providerId = "phygitals";
 
   getStatus() {
-    return env().PHYGITALS_API_URL
+    return (providerApiEnv().phygitalsEnabled && env().PHYGITALS_API_URL)
       ? status(this.providerId, "prepared", "Phygitals endpoint is configured; public response mapping is still required.")
-      : status(this.providerId, "needs_endpoint", "Phygitals discovery requires PHYGITALS_API_URL.");
+      : status(this.providerId, "disabled", "Provider not connected.");
   }
 }
 
@@ -124,9 +126,9 @@ class CollectorCryptMintDiscoveryConnector extends BaseMintDiscoveryConnector {
   providerId = "collector-crypt";
 
   getStatus() {
-    return env().COLLECTOR_CRYPT_API_URL
+    return (providerApiEnv().collectorCryptEnabled && env().COLLECTOR_CRYPT_API_URL)
       ? status(this.providerId, "prepared", "Collector Crypt endpoint is configured; use only official/public mint endpoints.")
-      : status(this.providerId, "needs_endpoint", "Collector Crypt discovery requires an official public endpoint or allowlisted on-chain collection IDs.");
+      : status(this.providerId, "disabled", "Provider not connected.");
   }
 }
 

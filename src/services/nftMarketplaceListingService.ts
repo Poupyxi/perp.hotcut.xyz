@@ -1,6 +1,6 @@
 type ListingProviderId = "magic-eden" | "tensor" | "phygitals" | "collector-crypt";
 type RuntimeEnv = Record<string, string | undefined>;
-type ProviderCheckStatus = "found" | "not_found" | "needs_api_key" | "needs_endpoint" | "error";
+type ProviderCheckStatus = "found" | "not_found" | "needs_api_key" | "needs_endpoint" | "disabled" | "error";
 
 export type ProviderCheck = {
   providerId: ListingProviderId;
@@ -27,6 +27,10 @@ export type ActiveMintListingLookupResult = {
 
 function env(): RuntimeEnv {
   return (globalThis as unknown as { process?: { env?: RuntimeEnv } }).process?.env ?? {};
+}
+
+function providerEnabled(name: "MAGIC_EDEN_ENABLED" | "PHYGITALS_ENABLED" | "COLLECTOR_CRYPT_ENABLED") {
+  return (env()[name] ?? "false") === "true";
 }
 
 function asString(value: unknown): string | null {
@@ -140,6 +144,7 @@ function normalizeListing(providerId: ListingProviderId, fallbackMarketplace: st
 }
 
 async function fetchMagicEdenListing(mint: string): Promise<ActiveMintListing | null> {
+  if (!providerEnabled("MAGIC_EDEN_ENABLED")) return null;
   const runtime = env();
   const headers: Record<string, string> = { accept: "application/json" };
   if (runtime.MAGIC_EDEN_API_KEY) headers.Authorization = `Bearer ${runtime.MAGIC_EDEN_API_KEY}`;
@@ -217,7 +222,10 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
     }
   };
 
-  const magicEdenListing = await tryProvider("magic-eden", () => fetchMagicEdenListing(mint));
+  if (!providerEnabled("MAGIC_EDEN_ENABLED")) {
+    providersChecked.push({ providerId: "magic-eden", status: "disabled", message: "Provider not connected." });
+  }
+  const magicEdenListing = providerEnabled("MAGIC_EDEN_ENABLED") ? await tryProvider("magic-eden", () => fetchMagicEdenListing(mint)) : null;
   if (magicEdenListing) {
     return {
       mint,
@@ -249,7 +257,7 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
     }
   }
 
-  if (runtime.PHYGITALS_API_URL) {
+  if (providerEnabled("PHYGITALS_ENABLED") && runtime.PHYGITALS_API_URL) {
     const phygitalsListing = await tryProvider(
       "phygitals",
       () => fetchGenericListing("phygitals", runtime.PHYGITALS_API_URL ?? "", mint, {
@@ -267,9 +275,11 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
         reason: "Phygitals active listing found",
       };
     }
+  } else {
+    providersChecked.push({ providerId: "phygitals", status: "disabled", message: "Provider not connected." });
   }
 
-  if (runtime.COLLECTOR_CRYPT_API_URL) {
+  if (providerEnabled("COLLECTOR_CRYPT_ENABLED") && runtime.COLLECTOR_CRYPT_API_URL) {
     const collectorCryptListing = await tryProvider(
       "collector-crypt",
       () => fetchGenericListing("collector-crypt", runtime.COLLECTOR_CRYPT_API_URL ?? "", mint, {
@@ -287,6 +297,8 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
         reason: "Collector Crypt active listing found",
       };
     }
+  } else {
+    providersChecked.push({ providerId: "collector-crypt", status: "disabled", message: "Provider not connected." });
   }
 
   return {

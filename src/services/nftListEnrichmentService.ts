@@ -9,6 +9,7 @@ import { readNftScannerConfig } from "./nftScannerConfig";
 import { saveProviderScanStatus } from "./nftScannerStatusService";
 import { saveRwaNftMarketEvent } from "./rwaNftMarketEventService";
 import { fetchWithHeliusKey, hasHeliusApiKey } from "./heliusApiKeyRotation";
+import { fetchShyftAssetByMint, hasShyftApiKey } from "./shyftNftService";
 import {
   fetchSolscanNftActivity,
   getProviderStrategyConfig,
@@ -19,6 +20,7 @@ import {
 
 type RuntimeEnv = Record<string, string | undefined>;
 type SqlRow = Record<string, unknown>;
+type MetadataProviderId = "shyft" | "helius" | "cache";
 
 export type EnrichNFTListOptions = {
   mint?: string | null;
@@ -227,6 +229,102 @@ function normalizedFromCachedRow(row: SqlRow, mint: string): ReturnType<typeof n
     rawSource: "helius",
     updatedAt: nowIso(),
   };
+}
+
+function isCompleteMetadata(normalized: ReturnType<typeof normalizeHeliusAsset>) {
+  return Boolean(normalized.name && normalized.image && normalized.owner && normalized.collection);
+}
+
+async function loadMetadataForMint(input: {
+  mint: string;
+  row: SqlRow | undefined;
+  market: string;
+  retries: number;
+}): Promise<{
+  rawAsset: unknown;
+  normalized: ReturnType<typeof normalizeHeliusAsset>;
+  metadataProvider: MetadataProviderId;
+  providerStatus: "ok" | "incomplete" | "error" | "unavailable";
+  usedFallback: boolean;
+}> {
+  const strategy = getProviderStrategyConfig();
+
+  if (hasShyftApiKey()) {
+    const shyft = await fetchShyftAssetByMint({
+      mint: input.mint,
+      owner: asString(input.row?.owner),
+      collection: asString(input.row?.collection) ?? asString(input.row?.source_collection),
+    });
+    if (shyft.asset) {
+      const normalized = normalizeHeliusAsset(shyft.asset, input.market);
+      if (isCompleteMetadata(normalized)) {
+        logProviderStrategy({
+          mint: input.mint,
+          requestedDataType: "metadata",
+          primaryProvider: strategy.metadataPrimaryProvider,
+          providerCalled: "shyft",
+          fallbackUsed: false,
+          providerStatus: "ok",
+          dbCacheUsed: false,
+        });
+        return { rawAsset: shyft.asset, normalized, metadataProvider: "shyft", providerStatus: "ok", usedFallback: false };
+      }
+      logProviderStrategy({
+        mint: input.mint,
+        requestedDataType: "metadata",
+        primaryProvider: strategy.metadataPrimaryProvider,
+        providerCalled: "shyft",
+        fallbackUsed: true,
+        providerStatus: "incomplete",
+        dbCacheUsed: false,
+      });
+    }
+
+    if (shyft.status !== "unavailable") {
+      if (!shyft.asset) {
+        logProviderStrategy({
+          mint: input.mint,
+          requestedDataType: "metadata",
+          primaryProvider: strategy.metadataPrimaryProvider,
+          providerCalled: "shyft",
+          fallbackUsed: true,
+          providerStatus: shyft.status,
+          dbCacheUsed: false,
+        });
+      }
+    }
+  }
+
+  if (hasHeliusApiKey()) {
+    const rawAsset = await withRetries(input.retries, () => getAssetByMint(input.mint));
+    const normalized = normalizeHeliusAsset(rawAsset, input.market);
+    logProviderStrategy({
+      mint: input.mint,
+      requestedDataType: "metadata",
+      primaryProvider: strategy.metadataPrimaryProvider,
+      providerCalled: "helius",
+      fallbackUsed: true,
+      providerStatus: "ok",
+      dbCacheUsed: false,
+    });
+    return { rawAsset, normalized, metadataProvider: "helius", providerStatus: "ok", usedFallback: true };
+  }
+
+  if (input.row) {
+    const normalized = normalizedFromCachedRow(input.row, input.mint);
+    logProviderStrategy({
+      mint: input.mint,
+      requestedDataType: "metadata",
+      primaryProvider: strategy.metadataPrimaryProvider,
+      providerCalled: "cache",
+      fallbackUsed: true,
+      providerStatus: "stale",
+      dbCacheUsed: true,
+    });
+    return { rawAsset: { source: "cache", mint: input.mint }, normalized, metadataProvider: "cache", providerStatus: "stale", usedFallback: true };
+  }
+
+  throw new Error("No metadata provider available");
 }
 
 function rowNeedsRefresh(row: SqlRow | undefined, ttlSeconds: number) {
@@ -1129,7 +1227,7 @@ function updateAssetFromEnrichment(input: {
   row: SqlRow;
   normalized: ReturnType<typeof normalizeHeliusAsset>;
   rawAsset: unknown;
-  metadataProvider: NftActivityProviderId;
+  metadataProvider: MetadataProviderId;
   fieldProviders: Record<string, string>;
   currentState: NFTMarketStatus;
   lastActivityType: NFTLastActivityType;
@@ -1283,8 +1381,11 @@ function statusFromRun(input: {
   lastActivitiesUpdated: number;
 }): ProviderScanStatus {
   const strategy = getProviderStrategyConfig();
+  const providerName = strategy.activityPrimaryProvider === "solscan"
+    ? `mixed-${hasShyftApiKey() ? "shyft-" : ""}${hasHeliusApiKey() ? "helius-" : ""}solscan`
+    : "helius";
   return {
-    provider: strategy.activityPrimaryProvider === "solscan" ? "mixed-helius-solscan" : "helius",
+    provider: providerName.replace(/-$/, ""),
     scanType: "market_state",
     status: hasHeliusApiKey() ? input.errors ? "error" : "live" : "needs_api_key",
     lastRunAt: input.startedAt,
@@ -1665,37 +1766,14 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
   let verifiedSalesStored = 0;
   let dbUpdated = false;
   try {
-    const strategy = getProviderStrategyConfig();
-    let rawAsset: unknown;
-    let normalized: ReturnType<typeof normalizeHeliusAsset>;
-    let metadataProvider: NftActivityProviderId = "helius";
-    try {
-      rawAsset = await withRetries(config.nftListEnrichMaxRetries, () => getAssetByMint(mint));
-      normalized = normalizeHeliusAsset(rawAsset, asString(row?.market) ?? asString(row?.category) ?? "unknown");
-      logProviderStrategy({
-        mint,
-        requestedDataType: "metadata",
-        primaryProvider: strategy.metadataPrimaryProvider,
-        providerCalled: "helius",
-        fallbackUsed: false,
-        providerStatus: "ok",
-        dbCacheUsed: false,
-      });
-    } catch (error) {
-      if (!row) throw error;
-      metadataProvider = "cache";
-      rawAsset = { source: "cache", mint };
-      normalized = normalizedFromCachedRow(row, mint);
-      logProviderStrategy({
-        mint,
-        requestedDataType: "metadata",
-        primaryProvider: strategy.metadataPrimaryProvider,
-        providerCalled: "cache",
-        fallbackUsed: true,
-        providerStatus: "stale",
-        dbCacheUsed: true,
-      });
-    }
+    const metadataResult = await loadMetadataForMint({
+      mint,
+      row,
+      market: asString(row?.market) ?? asString(row?.category) ?? "unknown",
+      retries: config.nftListEnrichMaxRetries,
+    });
+    const { rawAsset, normalized } = metadataResult;
+    const metadataProvider: MetadataProviderId = metadataResult.metadataProvider;
     const metadata = metadataStatus({ name: normalized.name, image: normalized.image, owner: normalized.owner });
     const activitySelection = await fetchActivityWithProviderStrategy({
       mint,
@@ -1797,12 +1875,12 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     if (dryRun) {
       console.log(`[NFT LOOKUP][DRY RUN] ${mint} state=${listingMarketState.currentState} lastActivity=${listingMarketState.lastActivityType} tx=${lastActivityTxHash ?? "none"}`);
       return {
-        nft: rowToNftDto(previewRow),
-        cacheHit: false,
-        heliusCalled: true,
-        dbUpdated: false,
-        providerUsed: listingMarketState.latestProvider,
-        reason: listingResult?.reason ?? activity.reason,
+      nft: rowToNftDto(previewRow),
+      cacheHit: false,
+      heliusCalled: true,
+      dbUpdated: false,
+      providerUsed: [metadataProvider, activitySelection.provider].filter(Boolean).join("+"),
+      reason: listingResult?.reason ?? activity.reason,
         verifiedSalesDetected,
         verifiedSalesStored: 0,
         error: null,
@@ -1849,7 +1927,7 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
       cacheHit: false,
       heliusCalled: true,
       dbUpdated,
-      providerUsed: listingMarketState.latestProvider,
+      providerUsed: [metadataProvider, activitySelection.provider].filter(Boolean).join("+"),
       reason: listingResult?.reason ?? activity.reason,
       verifiedSalesDetected,
       verifiedSalesStored,
@@ -1903,36 +1981,14 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
     const mint = asString(row.mint);
     if (!mint) continue;
     try {
-      const strategy = getProviderStrategyConfig();
-      let rawAsset: unknown;
-      let normalized: ReturnType<typeof normalizeHeliusAsset>;
-      let metadataProvider: NftActivityProviderId = "helius";
-      try {
-        rawAsset = await withRetries(config.nftListEnrichMaxRetries, () => getAssetByMint(mint));
-        normalized = normalizeHeliusAsset(rawAsset, asString(row.market) ?? asString(row.category) ?? "unknown");
-        logProviderStrategy({
-          mint,
-          requestedDataType: "metadata",
-          primaryProvider: strategy.metadataPrimaryProvider,
-          providerCalled: "helius",
-          fallbackUsed: false,
-          providerStatus: "ok",
-          dbCacheUsed: false,
-        });
-      } catch (error) {
-        metadataProvider = "cache";
-        rawAsset = { source: "cache", mint };
-        normalized = normalizedFromCachedRow(row, mint);
-        logProviderStrategy({
-          mint,
-          requestedDataType: "metadata",
-          primaryProvider: strategy.metadataPrimaryProvider,
-          providerCalled: "cache",
-          fallbackUsed: true,
-          providerStatus: "stale",
-          dbCacheUsed: true,
-        });
-      }
+      const metadataResult = await loadMetadataForMint({
+        mint,
+        row,
+        market: asString(row.market) ?? asString(row.category) ?? "unknown",
+        retries: config.nftListEnrichMaxRetries,
+      });
+      const { rawAsset, normalized } = metadataResult;
+      const metadataProvider: MetadataProviderId = metadataResult.metadataProvider;
       const metadata = metadataStatus({ name: normalized.name, image: normalized.image, owner: normalized.owner });
       const fetchDetailedHistory = shouldFetchDetailedHistory({
         row,
@@ -2091,9 +2147,11 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
     lastActivitiesUpdated,
     verifiedSalesDetected,
     verifiedSalesStored,
-    providersUsed: getProviderStrategyConfig().activityPrimaryProvider === "solscan"
-      ? ["solscan", ...(hasHeliusApiKey() ? ["helius"] : [])]
-      : (hasHeliusApiKey() ? ["helius"] : []),
+    providersUsed: [
+      ...(hasShyftApiKey() ? ["shyft"] : []),
+      ...(hasHeliusApiKey() ? ["helius"] : []),
+      "solscan",
+    ],
     errors,
     changes: changes.slice(0, 50),
     providerStatuses: [status],

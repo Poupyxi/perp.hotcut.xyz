@@ -50,6 +50,10 @@ function marketplaceFromActivitySource(value: unknown): string {
   return asString(value) ?? "Magic Eden";
 }
 
+function providerEnabled(env: ReturnType<typeof getRuntimeEnv>, flag: "MAGIC_EDEN_ENABLED" | "PHYGITALS_ENABLED" | "COLLECTOR_CRYPT_ENABLED") {
+  return (env[flag] ?? "false") === "true";
+}
+
 function isWithinWindow(iso: string, window: FetchWindow): boolean {
   const time = new Date(iso).getTime();
   return time >= window.from.getTime() && time <= window.to.getTime();
@@ -111,6 +115,9 @@ function extractMagicEdenSale(item: unknown, marketSlug: string, symbol: string)
 
 async function fetchMagicEdenSales(window: FetchWindow, config: Record<string, MarketSourceConfig>): Promise<ProviderResult> {
   const env = getRuntimeEnv();
+  if (!providerEnabled(env, "MAGIC_EDEN_ENABLED")) {
+    return { sales: [], status: { provider: "magic-eden", enabled: false, ok: false, message: "Provider not connected." } };
+  }
   const headers: Record<string, string> = { accept: "application/json" };
   if (env.MAGIC_EDEN_API_KEY) headers.Authorization = `Bearer ${env.MAGIC_EDEN_API_KEY}`;
   const markets = marketsFromConfig(config).filter((market) => market.config.magicEdenSymbols?.length);
@@ -210,11 +217,11 @@ export async function fetchMarketSales(days: number): Promise<MarketSalesRespons
   const [magicEden, solscan] = await Promise.all([fetchMagicEdenSales(window, config), fetchSolscanSales(window, config)]);
   const ignoredConfiguredMarkets = Object.keys(config).filter((slug) => !isApprovedMarketSlug(slug));
   const providerStatus: ProviderStatus[] = [
-    magicEden.status,
+    magicEden.status.enabled ? magicEden.status : { ...magicEden.status, message: "Provider not connected." },
     { provider: "tensor", enabled: Boolean(getRuntimeEnv().TENSOR_API_KEY), ok: false, message: "Tensor sales ingestion is prepared but not enabled until API access is confirmed." },
     solscan.status,
     { provider: "helius", enabled: Boolean(getRuntimeEnv().HELIUS_API_KEY), ok: false, message: "Helius fallback is reserved for generic on-chain transaction parsing." },
-    { provider: "collector-crypt", enabled: false, ok: false, message: "No documented public Collector Crypt sales API is configured." },
+    { provider: "collector-crypt", enabled: false, ok: false, message: "Provider not connected." },
   ];
   const liveSales = [...magicEden.sales, ...solscan.sales];
 

@@ -116,6 +116,7 @@ const ACTIVITY_OPTIONS = [
 
 function sourceCollectionLabel(value: string | null | undefined) {
   if (!value) return "collection unknown";
+  if (value === "collector_crypt" || value === "phygitals") return "Provider not connected";
   if (value === "CCryptWBYktukHDQ2vHGtVcmtjXxYzvw8XNVY64YN2Yf") return "Collector Crypt";
   if (value === "BSG6DyEihFFtfvxtL9mKYsvTwiZXB1rq5gARMTJC2xAM") return "Phygitals";
   if (value === "phygZDQZJZVHvJGYPGoKPYUtXw7mstSYtTtcuh8LJcC") return "Phygitals";
@@ -258,8 +259,7 @@ function activityClass(value: string | null | undefined) {
 function providerLabel(value: string | null | undefined) {
   if (!value) return "No provider";
   if (value === "helius_enhanced_tx" || value === "helius_webhook") return "Helius";
-  if (value === "magiceden" || value === "magic-eden") return "Magic Eden";
-  if (value === "collector-crypt") return "Collector Crypt";
+  if (value === "magiceden" || value === "magic-eden" || value === "collector-crypt" || value === "phygitals") return "Provider not connected";
   return value;
 }
 
