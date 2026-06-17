@@ -63,6 +63,9 @@ function derivedDisplayStatus(input: {
   return input.currentState ?? input.currentStatus ?? "unknown";
 }
 
+const NFT_LIST_CACHE_TTL_MS = 20_000;
+const nftListCache = new Map<string, { expiresAt: number; body: string }>();
+
 export const Route = createFileRoute("/api/nft-list")({
   server: {
     handlers: {
@@ -70,6 +73,20 @@ export const Route = createFileRoute("/api/nft-list")({
         const { getNftDb } = await import("@/services/nftSqliteDb");
 
         const url = new URL(request.url);
+
+        const cacheKey = url.search;
+        const now = Date.now();
+        const cached = nftListCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+          return new Response(cached.body, {
+            headers: {
+              "content-type": "application/json",
+              "cache-control": "public, max-age=20",
+              "x-cache": "HIT",
+            },
+          });
+        }
+
         const db = getNftDb();
 
         const page = Math.max(optionalNumber(url.searchParams.get("page")) ?? 1, 1);
@@ -192,21 +209,30 @@ export const Route = createFileRoute("/api/nft-list")({
         const totalRow = db.prepare(`SELECT COUNT(*) as total FROM nft_assets WHERE ${whereSql}`).get(...params) as { total?: number };
         const total = Number(totalRow?.total ?? 0);
 
+        // verified_listed: a marketplace provider confirmed an active listing.
         const listedTotal = countValue(db.prepare(`
           SELECT COUNT(*) as count
           FROM nft_assets
           WHERE ${whereSql}
-            AND (COALESCE(current_state, current_status, 'unknown') = 'listed' OR is_listed = 1)
+            AND listing_verification_status = 'verified_listed'
         `).get(...params) as Record<string, unknown>);
 
         const listedLast10Minutes = countValue(db.prepare(`
           SELECT COUNT(*) as count
           FROM nft_assets
           WHERE ${whereSql}
-            AND (COALESCE(current_state, current_status, 'unknown') = 'listed' OR is_listed = 1)
+            AND listing_verification_status = 'verified_listed'
             AND listing_updated_at IS NOT NULL
             AND listing_updated_at >= ?
         `).get(...params, last10MinutesIso) as Record<string, unknown>);
+
+        // unknown: listing was never checked (providers unavailable or first-time asset).
+        const listingUnknownTotal = countValue(db.prepare(`
+          SELECT COUNT(*) as count
+          FROM nft_assets
+          WHERE ${whereSql}
+            AND (listing_verification_status IS NULL OR listing_verification_status = 'unknown' OR listing_verification_status = 'provider_unavailable')
+        `).get(...params) as Record<string, unknown>);
 
         const bidTotal = countValue(db.prepare(`
           SELECT COUNT(*) as count
@@ -388,28 +414,40 @@ export const Route = createFileRoute("/api/nft-list")({
           ORDER BY count DESC
         `).all(...params);
 
-        return Response.json(
-          {
-            total,
-            page,
-            limit,
-            nfts,
-            categoryCounts,
-            assetTypeCounts,
-            publicGroupCounts,
-            listedTotal,
-            listedLast10Minutes,
-            bidTotal,
-            bidLast10Minutes,
-            verifiedSalesTotal,
-            verifiedSalesLast10Minutes,
-            transferredTotal,
-            transferredLast10Minutes,
-            mintedTotal,
-            mintedLast10Minutes,
+        const body = JSON.stringify({
+          total,
+          page,
+          limit,
+          nfts,
+          categoryCounts,
+          assetTypeCounts,
+          publicGroupCounts,
+          listedTotal,
+          listedLast10Minutes,
+          listingUnknownTotal,
+          bidTotal,
+          bidLast10Minutes,
+          verifiedSalesTotal,
+          verifiedSalesLast10Minutes,
+          transferredTotal,
+          transferredLast10Minutes,
+          mintedTotal,
+          mintedLast10Minutes,
+        });
+
+        nftListCache.set(cacheKey, { expiresAt: Date.now() + NFT_LIST_CACHE_TTL_MS, body });
+        if (nftListCache.size > 64) {
+          const firstKey = nftListCache.keys().next().value;
+          if (firstKey) nftListCache.delete(firstKey);
+        }
+
+        return new Response(body, {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "public, max-age=20",
+            "x-cache": "MISS",
           },
-          { headers: { "Cache-Control": "no-store" } },
-        );
+        });
       },
     },
   },

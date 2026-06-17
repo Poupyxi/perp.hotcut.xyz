@@ -17,12 +17,30 @@ export type ActiveMintListing = {
   rawPayload: unknown;
 };
 
+/**
+ * Definitive listing verification result — independent of scan priority.
+ *
+ * unknown            — no check has ever been performed (initial / no-provider state)
+ * verified_listed    — a provider confirmed an active listing
+ * verified_unlisted  — a provider ran and found no listing (confirmed absent)
+ * provider_unavailable — all configured providers were disabled or unconfigured;
+ *                        no actual marketplace check was made; existing DB state must
+ *                        be preserved — do NOT write is_listed = 0
+ */
+export type ListingVerificationStatus =
+  | "unknown"
+  | "verified_listed"
+  | "verified_unlisted"
+  | "provider_unavailable";
+
 export type ActiveMintListingLookupResult = {
   mint: string;
   found: boolean;
   listing: ActiveMintListing | null;
   providersChecked: ProviderCheck[];
   reason: string;
+  /** Derived from which providers actually ran. */
+  verificationStatus: ListingVerificationStatus;
 };
 
 function env(): RuntimeEnv {
@@ -190,6 +208,14 @@ async function fetchGenericListing(
   return normalizeListing(providerId, marketplaceFromValue(providerId, providerId), payload);
 }
 
+/** Derive verification status from which providers actually ran. */
+function deriveVerificationStatus(found: boolean, checks: ProviderCheck[]): ListingVerificationStatus {
+  if (found) return "verified_listed";
+  // A provider "actually ran" only when its status is found or not_found.
+  const anyActualCheck = checks.some((c) => c.status === "found" || c.status === "not_found");
+  return anyActualCheck ? "verified_unlisted" : "provider_unavailable";
+}
+
 export async function lookupActiveListingByMint(mint: string): Promise<ActiveMintListingLookupResult> {
   const runtime = env();
   const providersChecked: ProviderCheck[] = [];
@@ -233,6 +259,7 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
       listing: magicEdenListing,
       providersChecked,
       reason: "Magic Eden active listing found",
+      verificationStatus: "verified_listed",
     };
   }
 
@@ -253,6 +280,7 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
         listing: tensorListing,
         providersChecked,
         reason: "Tensor active listing found",
+        verificationStatus: "verified_listed",
       };
     }
   }
@@ -273,6 +301,7 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
         listing: phygitalsListing,
         providersChecked,
         reason: "Phygitals active listing found",
+        verificationStatus: "verified_listed",
       };
     }
   } else {
@@ -295,6 +324,7 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
         listing: collectorCryptListing,
         providersChecked,
         reason: "Collector Crypt active listing found",
+        verificationStatus: "verified_listed",
       };
     }
   } else {
@@ -307,5 +337,6 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
     listing: null,
     providersChecked,
     reason: providersChecked.length ? "No active listing found" : "No marketplace listing providers configured",
+    verificationStatus: deriveVerificationStatus(false, providersChecked),
   };
 }

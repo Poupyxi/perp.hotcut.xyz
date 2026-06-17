@@ -482,6 +482,45 @@ function txSignature(tx: Record<string, unknown>) {
   return asString(tx.signature) ?? asString(tx.transactionSignature) ?? asString(tx.txHash);
 }
 
+// Maps Helius Enhanced Transaction tx.type values to our internal activity
+// type. Helius documents these at https://docs.helius.dev/data-streaming/enhanced-transactions/transaction-types.
+// We don't enumerate every variant — only the ones we want to route, and let
+// the fallback text matchers handle the long tail.
+function classifyByHeliusType(
+  txType: string,
+  owner: string | null,
+): { type: NFTLastActivityType; state: NFTMarketStatus } | null {
+  if (!txType) return null;
+  if (txType === "NFT_SALE" || txType === "TOKEN_SALE" || txType === "NFT_AUCTION_WON") {
+    return { type: owner ? "bought" : "sold", state: owner ? "owned" : "sold" };
+  }
+  if (txType === "NFT_LISTING" || txType === "NFT_LISTING_UPDATE" || txType === "NFT_AUCTION_CREATED") {
+    return { type: "listed", state: "listed" };
+  }
+  if (txType === "NFT_CANCEL_LISTING" || txType === "NFT_AUCTION_CANCELLED") {
+    return { type: "delisted", state: "unlisted" };
+  }
+  if (txType === "NFT_BID" || txType === "NFT_GLOBAL_BID" || txType === "OFFER_PLACED") {
+    return { type: "bid", state: owner ? "owned" : "unknown" };
+  }
+  if (txType === "OFFER_CANCELED" || txType === "OFFER_CANCELLED" || txType === "NFT_BID_CANCELLED") {
+    return { type: "delisted", state: owner ? "owned" : "unknown" };
+  }
+  if (txType === "NFT_MINT" || txType === "TOKEN_MINT" || txType === "COMPRESSED_NFT_MINT") {
+    return { type: "minted", state: owner ? "owned" : "unknown" };
+  }
+  if (txType === "TRANSFER" || txType === "TOKEN_TRANSFER") {
+    return { type: "transferred", state: owner ? "owned" : "transferred_out" };
+  }
+  if (txType === "BURN" || txType === "TOKEN_BURN") {
+    return { type: "transferred", state: "transferred_out" };
+  }
+  if (txType === "NFT_PARTICIPATION_REWARD" || txType === "ATTEST") {
+    return { type: "transferred", state: owner ? "owned" : "unknown" };
+  }
+  return null;
+}
+
 function textFromTx(tx: Record<string, unknown>) {
   return [
     tx.type,
@@ -871,6 +910,21 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
     };
   }
 
+  // Type-first classification: trust Helius's tx.type field directly.
+  // Covers cases where the sale parser misses (e.g. partial enriched data,
+  // marketplaces Helius doesn't decode fully).
+  const txType = String(tx.type ?? "").toUpperCase();
+  const txSource = String(tx.source ?? "").toUpperCase();
+  const typeClassification = classifyByHeliusType(txType, owner);
+  if (typeClassification) {
+    return {
+      ...typeClassification,
+      sale: null,
+      reason: `Helius tx.type=${txType} (source=${txSource || "n/a"})`,
+      debug: commonDebug,
+    };
+  }
+
   const text = textFromTx(tx);
   if (text.includes("mint")) {
     return {
@@ -881,7 +935,7 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       debug: commonDebug,
     };
   }
-  if (text.includes("delist") || text.includes("cancel listing")) {
+  if (text.includes("delist") || text.includes("cancel listing") || text.includes("listing_canceled") || text.includes("listing_cancelled")) {
     return {
       type: "delisted",
       state: "unlisted",
@@ -890,9 +944,18 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       debug: commonDebug,
     };
   }
+  if (text.includes("sold") || text.includes("sale") || text.includes("purchase") || text.includes("bought")) {
+    return {
+      type: owner ? "bought" : "sold",
+      state: owner ? "owned" : "sold",
+      sale: null,
+      reason: "transaction text included sale wording",
+      debug: commonDebug,
+    };
+  }
   if (text.includes("bid") || text.includes("offer")) {
     return {
-      type: "bid",
+      type: text.includes("offer") && !text.includes("bid") ? "make_offer" : "bid",
       state: owner ? "owned" : "unknown",
       sale: null,
       reason: "transaction text included bid/offer wording",
@@ -908,12 +971,32 @@ function detectActivityFromTx(tx: Record<string, unknown>, mint: string, owner: 
       debug: commonDebug,
     };
   }
-  if (text.includes("transfer")) {
+  if (text.includes("burn")) {
+    return {
+      type: "transferred",
+      state: "transferred_out",
+      sale: null,
+      reason: "transaction text included burn wording",
+      debug: commonDebug,
+    };
+  }
+  if (text.includes("transfer") || text.includes("send")) {
     return {
       type: "transferred",
       state: owner ? "owned" : "transferred_out",
       sale: null,
       reason: `transaction text only showed transfer wording and pack evidence stayed insufficient: ${packEvidence.reason}`,
+      debug: commonDebug,
+    };
+  }
+  // Last fallback: if there are NFT transfers, treat as transferred even
+  // without descriptive text.
+  if (nftTransferSummary.length > 0 || tokenTransferSummary.length > 0) {
+    return {
+      type: "transferred",
+      state: owner ? "owned" : "transferred_out",
+      sale: null,
+      reason: `no text match but ${nftTransferSummary.length || tokenTransferSummary.length} NFT/token transfer(s) detected on-chain`,
       debug: commonDebug,
     };
   }
@@ -1043,10 +1126,11 @@ function unknownActivity(owner: string | null, reason: string): ActivityDetectio
   };
 }
 
-async function fetchHeliusActivityForMint(mint: string, retries: number, fallbackUsed = false): Promise<ProviderActivitySelection> {
-  const signatures = await withRetries(retries, () => recentSignaturesForMint(mint, 8));
+async function fetchHeliusActivityForMint(mint: string, retries: number, fallbackUsed = false, signaturesLimit = 1): Promise<ProviderActivitySelection> {
+  const limit = Math.max(1, Math.min(8, signaturesLimit));
+  const signatures = await withRetries(retries, () => recentSignaturesForMint(mint, limit));
   const signatureValues = signatures.map((signature) => asString(signature.signature)).filter((signature): signature is string => Boolean(signature));
-  const txs = await withRetries(retries, () => enhancedTransactions(signatureValues.slice(0, 8)));
+  const txs = await withRetries(retries, () => enhancedTransactions(signatureValues.slice(0, limit)));
   return {
     provider: "helius",
     status: txs.length ? "ok" : "incomplete",
@@ -1071,6 +1155,7 @@ async function fetchActivityWithProviderStrategy(input: {
   retries: number;
   useDetailedHistory: boolean;
   dbCacheAvailable: boolean;
+  signaturesLimit?: number;
 }): Promise<ProviderActivitySelection> {
   const strategy = getProviderStrategyConfig();
   const primary = strategy.activityPrimaryProvider === "helius" ? "helius" : "solscan";
@@ -1124,7 +1209,7 @@ async function fetchActivityWithProviderStrategy(input: {
         dbCacheUsed: false,
       });
       try {
-        return await fetchHeliusActivityForMint(input.mint, input.retries, true);
+        return await fetchHeliusActivityForMint(input.mint, input.retries, true, input.signaturesLimit);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Helius activity fallback failed";
         logProviderStrategy({
@@ -1164,7 +1249,7 @@ async function fetchActivityWithProviderStrategy(input: {
   }
 
   try {
-    return await fetchHeliusActivityForMint(input.mint, input.retries);
+    return await fetchHeliusActivityForMint(input.mint, input.retries, false, input.signaturesLimit);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Helius activity failed";
     if (strategy.fallbackEnabled) {
@@ -1406,6 +1491,8 @@ export type RefreshNftByMintOptions = {
   mint: string;
   refresh?: boolean | null;
   dryRun?: boolean | null;
+  /** Skip transaction-history fetching. Only 1 Helius DAS call per NFT + marketplace listing lookup. */
+  listingOnly?: boolean | null;
 };
 
 export type RefreshNftByMintResult = {
@@ -1565,6 +1652,8 @@ type DerivedListingMarketState = {
   listingMarketplace: string | null;
   listingUpdatedAt: string | null;
   rawMarketStateJson: string;
+  /** Verification status from the marketplace lookup. Controls whether is_listed is written. */
+  listingVerificationStatus: import("./nftMarketplaceListingService").ListingVerificationStatus;
 };
 
 function deriveListingMarketState(input: {
@@ -1614,6 +1703,7 @@ function deriveListingMarketState(input: {
     listedPriceUsd: hasListing ? listing!.priceUsd : null,
     listingMarketplace: hasListing ? listing!.marketplace : null,
     listingUpdatedAt: hasListing ? listingAt : null,
+    listingVerificationStatus: input.listingResult?.verificationStatus ?? "unknown",
     rawMarketStateJson: stringifyJson({
       provider: latestProvider,
       activeListing: hasListing ? {
@@ -1657,46 +1747,93 @@ function applyListingMarketStateToPreviewRow(row: SqlRow, marketState: DerivedLi
 
 function persistListingMarketState(mint: string, marketState: DerivedListingMarketState) {
   const timestamp = nowIso();
-  getNftDb().prepare(`
-    UPDATE nft_assets SET
-      is_listed = ?,
-      listed_price_sol = ?,
-      listed_price_usd = ?,
-      listing_marketplace = ?,
-      listing_updated_at = ?,
-      current_state = ?,
-      current_status = ?,
-      last_activity_type = ?,
-      last_activity_at = ?,
-      last_activity_provider = ?,
-      latest_provider = ?,
-      latest_marketplace = ?,
-      latest_market_price_sol = ?,
-      latest_market_price_usd = ?,
-      raw_market_state_json = ?,
-      market_updated_at = ?,
-      updated_at = ?
-    WHERE mint = ?
-  `).run(
-    sqliteBool(marketState.isListed),
-    marketState.listedPriceSol,
-    marketState.listedPriceUsd,
-    marketState.listingMarketplace,
-    marketState.listingUpdatedAt,
-    marketState.currentState,
-    marketState.currentState,
-    marketState.lastActivityType,
-    marketState.lastActivityAt,
-    marketState.lastActivityProvider,
-    marketState.latestProvider,
-    marketState.latestMarketplace,
-    marketState.latestMarketPriceSol,
-    marketState.latestMarketPriceUsd,
-    marketState.rawMarketStateJson,
-    timestamp,
-    timestamp,
-    mint,
-  );
+  const vs = marketState.listingVerificationStatus;
+  // When providers are unavailable no actual marketplace check ran.
+  // Preserve whatever is_listed value is already in the DB instead of overwriting with 0.
+  const providerUnavailable = vs === "provider_unavailable" || vs === "unknown";
+  const checkedAt = providerUnavailable ? null : timestamp;
+
+  if (providerUnavailable) {
+    // Partial update: write activity/state fields but leave is_listed and listing fields intact.
+    getNftDb().prepare(`
+      UPDATE nft_assets SET
+        current_state = ?,
+        current_status = ?,
+        last_activity_type = ?,
+        last_activity_at = ?,
+        last_activity_provider = ?,
+        latest_provider = ?,
+        latest_marketplace = ?,
+        latest_market_price_sol = ?,
+        latest_market_price_usd = ?,
+        listing_verification_status = ?,
+        raw_market_state_json = ?,
+        market_updated_at = ?,
+        updated_at = ?
+      WHERE mint = ?
+    `).run(
+      marketState.currentState,
+      marketState.currentState,
+      marketState.lastActivityType,
+      marketState.lastActivityAt,
+      marketState.lastActivityProvider,
+      marketState.latestProvider,
+      marketState.latestMarketplace,
+      marketState.latestMarketPriceSol,
+      marketState.latestMarketPriceUsd,
+      vs,
+      marketState.rawMarketStateJson,
+      timestamp,
+      timestamp,
+      mint,
+    );
+  } else {
+    // Full update: a provider actually ran — safe to write is_listed.
+    getNftDb().prepare(`
+      UPDATE nft_assets SET
+        is_listed = ?,
+        listed_price_sol = ?,
+        listed_price_usd = ?,
+        listing_marketplace = ?,
+        listing_updated_at = ?,
+        current_state = ?,
+        current_status = ?,
+        last_activity_type = ?,
+        last_activity_at = ?,
+        last_activity_provider = ?,
+        latest_provider = ?,
+        latest_marketplace = ?,
+        latest_market_price_sol = ?,
+        latest_market_price_usd = ?,
+        listing_verification_status = ?,
+        last_listing_checked_at = ?,
+        raw_market_state_json = ?,
+        market_updated_at = ?,
+        updated_at = ?
+      WHERE mint = ?
+    `).run(
+      sqliteBool(marketState.isListed),
+      marketState.listedPriceSol,
+      marketState.listedPriceUsd,
+      marketState.listingMarketplace,
+      marketState.listingUpdatedAt,
+      marketState.currentState,
+      marketState.currentState,
+      marketState.lastActivityType,
+      marketState.lastActivityAt,
+      marketState.lastActivityProvider,
+      marketState.latestProvider,
+      marketState.latestMarketplace,
+      marketState.latestMarketPriceSol,
+      marketState.latestMarketPriceUsd,
+      vs,
+      checkedAt,
+      marketState.rawMarketStateJson,
+      timestamp,
+      timestamp,
+      mint,
+    );
+  }
 }
 
 export async function refreshNftByMint(options: RefreshNftByMintOptions): Promise<RefreshNftByMintResult> {
@@ -1775,19 +1912,21 @@ export async function refreshNftByMint(options: RefreshNftByMintOptions): Promis
     const { rawAsset, normalized } = metadataResult;
     const metadataProvider: MetadataProviderId = metadataResult.metadataProvider;
     const metadata = metadataStatus({ name: normalized.name, image: normalized.image, owner: normalized.owner });
+    const listingOnly = options.listingOnly === true;
     const activitySelection = await fetchActivityWithProviderStrategy({
       mint,
       owner: normalized.owner,
       collection: normalized.collection,
       retries: config.nftListEnrichMaxRetries,
-      useDetailedHistory: true,
+      useDetailedHistory: !listingOnly,
       dbCacheAvailable: Boolean(row),
+      signaturesLimit: config.nftListEnrichSignaturesLimit,
     });
     const txs = activitySelection.txs;
     const latestTx = txs[0] ?? null;
     const activity = latestTx
       ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection, activitySelection.signatureCount)
-      : unknownActivity(normalized.owner, activitySelection.dbCacheUsed ? "provider unavailable, preserved cached activity when possible" : "no recent transaction found");
+      : unknownActivity(normalized.owner, listingOnly ? "listing-only mode: tx history skipped" : activitySelection.dbCacheUsed ? "provider unavailable, preserved cached activity when possible" : "no recent transaction found");
     const verifiedSale = activitySelection.provider === "helius" ? activity.sale : null;
     const detectedLastActivityAt = latestTx ? timestampFromTx(latestTx) : null;
     const detectedLastActivityTxHash = latestTx ? txSignature(latestTx) : null;
@@ -1974,7 +2113,8 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
   let verifiedSalesDetected = 0;
   let verifiedSalesStored = 0;
 
-  console.log(`[NFT LIST ENRICH] Starting dryRun=${dryRun} batchSize=${config.nftListEnrichBatchSize} lane=${selectionOptions.lane ?? "all"}`);
+  const listingOnly = config.nftListEnrichListingOnly;
+  console.log(`[NFT LIST ENRICH] Starting dryRun=${dryRun} batchSize=${config.nftListEnrichBatchSize} lane=${selectionOptions.lane ?? "all"} listingOnly=${listingOnly}`);
   if (focusMint) console.log(`[NFT LIST ENRICH] Focus mode enabled: ${focusMint}`);
 
   for (const row of rows) {
@@ -1990,7 +2130,7 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
       const { rawAsset, normalized } = metadataResult;
       const metadataProvider: MetadataProviderId = metadataResult.metadataProvider;
       const metadata = metadataStatus({ name: normalized.name, image: normalized.image, owner: normalized.owner });
-      const fetchDetailedHistory = shouldFetchDetailedHistory({
+      const fetchDetailedHistory = !listingOnly && shouldFetchDetailedHistory({
         row,
         lane: selectionOptions.lane,
         owner: normalized.owner,
@@ -2003,12 +2143,13 @@ export async function enrichNFTList(options: EnrichNFTListOptions = {}): Promise
         retries: config.nftListEnrichMaxRetries,
         useDetailedHistory: fetchDetailedHistory,
         dbCacheAvailable: true,
+        signaturesLimit: config.nftListEnrichSignaturesLimit,
       });
       const txs = activitySelection.txs;
       const latestTx = txs[0] ?? null;
       const activity = latestTx
         ? detectActivityFromTx(latestTx, mint, normalized.owner, normalized.collection, activitySelection.signatureCount)
-        : unknownActivity(normalized.owner, fetchDetailedHistory ? "no recent transaction found" : `skipped detailed transaction refresh for ${selectionOptions.lane ?? "all"} lane`);
+        : unknownActivity(normalized.owner, listingOnly ? "listing-only mode: tx history skipped" : fetchDetailedHistory ? "no recent transaction found" : `skipped detailed transaction refresh for ${selectionOptions.lane ?? "all"} lane`);
       const verifiedSale = activitySelection.provider === "helius" ? activity.sale : null;
       const detectedCategory = detectRwaNftCategory({
         name: normalized.name,

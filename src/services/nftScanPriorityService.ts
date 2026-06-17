@@ -37,11 +37,14 @@ export function getScanIntervalSeconds(priority: ScanPriority, config: ScanInter
 
 export function computeScanPriority(row: {
   is_listed?: number | null;
+  listing_verification_status?: string | null;
   last_activity_at?: string | null;
 }): { priority: ScanPriority; reason: string } {
-  // listed always wins
-  if (row.is_listed) {
-    return { priority: "listed", reason: "is_listed=1" };
+  // listed priority ONLY for confirmed-listed NFTs — not for is_listed=0/unknown.
+  // is_listed=1 alone is not sufficient; the marketplace must have confirmed the listing.
+  const vs = row.listing_verification_status;
+  if (vs === "verified_listed") {
+    return { priority: "listed", reason: "listing_verification_status=verified_listed" };
   }
 
   const now = Date.now();

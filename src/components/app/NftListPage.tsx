@@ -1,4 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  Image as ImageIcon,
+  Layers,
+  List,
+  RefreshCcw,
+  Search,
+  TrendingUp,
+  X,
+} from "lucide-react";
 import { RelativeTime } from "./RelativeTime";
 import { categoryIcon } from "./categoryIcons";
 import { ScannerStatusPanel } from "./ScannerStatusPanel";
@@ -49,6 +62,7 @@ type NftAsset = {
 type NftListStats = {
   listedTotal: number;
   listedLast10Minutes: number;
+  listingUnknownTotal: number;
   bidTotal: number;
   bidLast10Minutes: number;
   verifiedSalesTotal: number;
@@ -238,22 +252,31 @@ function activityLabel(value: string | null | undefined) {
   if (value === "pack_opened") return "Pack Opened";
   if (value === "transferred") return "Transferred";
   if (value === "listed") return "Listed";
-  if (value === "make_offer") return "MakeOffer";
+  if (value === "make_offer") return "Make Offer";
   if (value === "bid") return "Bid";
   if (value === "delisted") return "Delisted";
   if (value === "bought") return "Buy";
-  if (value === "sold") return "Sold";
+  if (value === "sold") return "Sell";
   if (value === "minted") return "Minted";
   return "Unknown";
 }
 
+// Each activity type gets its own color
 function activityClass(value: string | null | undefined) {
-  if (value === "listed") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
-  if (value === "make_offer") return "border-violet-500/40 bg-violet-500/10 text-violet-300";
-  if (value === "bid") return "border-violet-500/40 bg-violet-500/10 text-violet-300";
-  if (value === "bought" || value === "minted" || value === "pack_opened") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-  if (value === "sold" || value === "transferred" || value === "delisted") return "border-blue-500/40 bg-blue-500/10 text-blue-300";
-  return "border-border bg-muted text-muted-foreground";
+  const baseClasses = "w-full text-center rounded border px-2 py-1 text-xs";
+
+  // Unique color per activity type
+  if (value === "minted") return `${baseClasses} border-teal-500/40 bg-teal-500/10 text-teal-300`;
+  if (value === "bought") return `${baseClasses} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`;
+  if (value === "sold") return `${baseClasses} border-orange-500/40 bg-orange-500/10 text-orange-300`;
+  if (value === "listed") return `${baseClasses} border-sky-500/40 bg-sky-500/10 text-sky-300`;
+  if (value === "delisted") return `${baseClasses} border-rose-500/40 bg-rose-500/10 text-rose-300`;
+  if (value === "bid") return `${baseClasses} border-violet-500/40 bg-violet-500/10 text-violet-300`;
+  if (value === "make_offer") return `${baseClasses} border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-300`;
+  if (value === "transferred") return `${baseClasses} border-slate-500/40 bg-slate-500/10 text-slate-300`;
+  if (value === "pack_opened") return `${baseClasses} border-cyan-500/40 bg-cyan-500/10 text-cyan-300`;
+
+  return `${baseClasses} border-border bg-muted text-muted-foreground`;
 }
 
 function providerLabel(value: string | null | undefined) {
@@ -306,6 +329,7 @@ export function NftListPage() {
   const [stats, setStats] = useState<NftListStats>({
     listedTotal: 0,
     listedLast10Minutes: 0,
+    listingUnknownTotal: 0,
     bidTotal: 0,
     bidLast10Minutes: 0,
     verifiedSalesTotal: 0,
@@ -385,6 +409,7 @@ export function NftListPage() {
         setStats({
           listedTotal: payload.listedTotal ?? 0,
           listedLast10Minutes: payload.listedLast10Minutes ?? 0,
+          listingUnknownTotal: payload.listingUnknownTotal ?? 0,
           bidTotal: payload.bidTotal ?? 0,
           bidLast10Minutes: payload.bidLast10Minutes ?? 0,
           verifiedSalesTotal: payload.verifiedSalesTotal ?? 0,
@@ -461,46 +486,87 @@ export function NftListPage() {
 
   const visibleCards = nfts.filter((nft) => nft.assetType === "card").length;
 
+  const activeFilters: Array<{ key: string; label: string; onClear: () => void }> = [];
+  if (category !== "all") activeFilters.push({ key: "cat", label: categoryLabel(category), onClear: () => setCategory("all") });
+  if (assetType !== "all") activeFilters.push({ key: "asset", label: assetTypeLabel(assetType), onClear: () => setAssetType("all") });
+  if (status !== "all") activeFilters.push({ key: "status", label: STATUS_OPTIONS.find(([v]) => v === status)?.[1] ?? status, onClear: () => setStatus("all") });
+  if (sourceCollection) activeFilters.push({ key: "src", label: SOURCE_COLLECTION_OPTIONS.find(([v]) => v === sourceCollection)?.[1] ?? sourceCollection, onClear: () => setSourceCollection("") });
+  if (search.trim()) activeFilters.push({ key: "search", label: `"${search.trim()}"`, onClear: () => setSearch("") });
+  if (includeOther) activeFilters.push({ key: "other", label: "Include other", onClear: () => setIncludeOther(false) });
+  if (includeUnknown) activeFilters.push({ key: "unk", label: "Include unknown", onClear: () => setIncludeUnknown(false) });
+  if (withoutBid) activeFilters.push({ key: "wb", label: "Without bid", onClear: () => setWithoutBid(false) });
+  if (missingImage) activeFilters.push({ key: "img", label: "Missing image", onClear: () => setMissingImage(false) });
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">NFT List</h1>
-        <p className="text-sm text-muted-foreground mt-1">Tracked NFTs enriched with current status, verified sales, listings, and latest market price.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/30 text-primary">
+            <List className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">NFT List</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Tracked NFTs enriched with current status, verified sales, listings, and latest market price.
+            </p>
+          </div>
+        </div>
+        <div className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+          <RefreshCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-primary" : ""}`} />
+          <span>Auto-refresh in <span className="font-mono tabular-nums text-foreground">{formatCountdown(refreshCountdownSeconds)}</span></span>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="NFTs matching filters" value={loading ? "..." : total.toLocaleString("en-US")} />
-        <Stat label="Cards on page" value={loading ? "..." : visibleCards.toString()} />
-        <MarketActivityCard
-          loading={loading}
-          stats={stats}
+        <Stat
+          icon={<Layers className="h-4 w-4" />}
+          label="NFTs matching filters"
+          value={loading ? "..." : total.toLocaleString("en-US")}
+          accent="primary"
         />
+        <Stat
+          icon={<ImageIcon className="h-4 w-4" />}
+          label="Cards on page"
+          value={loading ? "..." : visibleCards.toString()}
+          accent="emerald"
+        />
+        <MarketActivityCard loading={loading} stats={stats} />
       </div>
 
       <ScannerStatusPanel />
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <div className="grid md:grid-cols-5 gap-3">
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search name, mint, owner, collection"
-            className="h-10 rounded-md border border-border bg-surface px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
+        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <Filter className="h-3.5 w-3.5" />
+          <span>Filters</span>
+        </div>
 
-          <select value={category} onChange={(event) => setCategory(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+        <div className="grid gap-3 md:grid-cols-5">
+          <div className="relative md:col-span-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name, mint, owner, collection"
+              className="h-10 w-full rounded-md border border-border bg-surface pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/40 transition"
+            />
+          </div>
+
+          <select value={category} onChange={(event) => setCategory(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:border-primary/50">
             {CATEGORY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
 
-          <select value={assetType} onChange={(event) => setAssetType(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+          <select value={assetType} onChange={(event) => setAssetType(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:border-primary/50">
             {ASSET_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
 
-          <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+          <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:border-primary/50">
             {STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
+        </div>
 
-          <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm">
+        <div className="grid gap-3 md:grid-cols-5">
+          <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-10 rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:border-primary/50">
             <option value="checked_desc">Recently checked</option>
             <option value="updated_desc">Recently updated</option>
             <option value="name_asc">Name A to Z</option>
@@ -509,95 +575,153 @@ export function NftListPage() {
             <option value="market_price_asc">Market price low to high</option>
             <option value="category_asc">Category A to Z</option>
           </select>
-        </div>
 
-        <div className="grid md:grid-cols-4 gap-3">
-        <select
+          <select
             value={sourceCollection || "all"}
             onChange={(event) => setSourceCollection(event.target.value === "all" ? "" : event.target.value)}
-            className="h-10 rounded-md border border-border bg-surface px-3 text-sm"
-            >
+            className="h-10 rounded-md border border-border bg-surface px-3 text-sm focus:outline-none focus:border-primary/50"
+          >
             {SOURCE_COLLECTION_OPTIONS.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>))}
-        </select>
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
 
-          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
-            <span>Include other</span>
-            <input type="checkbox" checked={includeOther} onChange={(event) => setIncludeOther(event.target.checked)} className="h-4 w-4 accent-primary" />
-          </label>
-
-          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
-            <span>Include unknown</span>
-            <input type="checkbox" checked={includeUnknown} onChange={(event) => setIncludeUnknown(event.target.checked)} className="h-4 w-4 accent-primary" />
-          </label>
-
-          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
-            <span>Without bid</span>
-            <input type="checkbox" checked={withoutBid} onChange={(event) => setWithoutBid(event.target.checked)} className="h-4 w-4 accent-primary" />
-          </label>
+          <ToggleChip label="Other" checked={includeOther} onChange={setIncludeOther} />
+          <ToggleChip label="Unknown" checked={includeUnknown} onChange={setIncludeUnknown} />
+          <ToggleChip label="Without bid" checked={withoutBid} onChange={setWithoutBid} />
         </div>
-        <div className="grid md:grid-cols-4 gap-3">
-          <label className="h-10 rounded-md border border-border bg-surface px-3 text-sm flex items-center justify-between gap-3 text-muted-foreground">
-            <span>Missing image only</span>
-            <input type="checkbox" checked={missingImage} onChange={(event) => setMissingImage(event.target.checked)} className="h-4 w-4 accent-primary" />
-          </label>
+
+        <div className="grid gap-3 md:grid-cols-5">
+          <ToggleChip label="Missing image only" checked={missingImage} onChange={setMissingImage} />
         </div>
+
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/60">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground pr-1">Active</span>
+            {activeFilters.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={filter.onClear}
+                className="group/chip inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-[11px] text-primary hover:bg-primary/20 transition"
+              >
+                {filter.label}
+                <X className="h-3 w-3 opacity-60 group-hover/chip:opacity-100" />
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setCategory("all");
+                setAssetType("all");
+                setStatus("all");
+                setSourceCollection("");
+                setSearch("");
+                setIncludeOther(false);
+                setIncludeUnknown(false);
+                setWithoutBid(false);
+                setMissingImage(false);
+              }}
+              className="ml-auto text-[11px] text-muted-foreground hover:text-foreground transition"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">{error}</div>}
 
-      <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="rounded-lg border border-border bg-card overflow-hidden shadow-sm">
         <div className="border-b border-border px-5 py-3 text-sm text-muted-foreground flex items-center justify-between gap-3">
-          <span>{loading ? loadingLabel : `Showing ${resultStart}-${resultEnd} of ${total.toLocaleString("en-US")} NFTs`}</span>
+          <span>
+            {loading
+              ? loadingLabel
+              : (
+                <>
+                  Showing <span className="font-mono tabular-nums text-foreground">{resultStart}-{resultEnd}</span> of{" "}
+                  <span className="font-mono tabular-nums text-foreground">{total.toLocaleString("en-US")}</span> NFTs
+                </>
+              )}
+          </span>
           <div className="flex items-center gap-3 text-xs">
-            <span className="inline-flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
-              Next update in {formatCountdown(refreshCountdownSeconds)}
-            </span>
-            {!includeOther && !includeUnknown && <span>Cards only · other assets hidden</span>}
+            {!includeOther && !includeUnknown && (
+              <span className="hidden md:inline">Cards only · other assets hidden</span>
+            )}
           </div>
         </div>
 
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
             <tr className="text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border">
-              <th className="w-[120px] text-center font-medium px-5 py-3">Category</th>
+              <th className="w-[110px] text-center font-medium px-5 py-3">Category</th>
               <th className="text-left font-medium px-5 py-3">NFT</th>
               <th className="text-center font-medium px-5 py-3">Wallet</th>
               <th className="text-left font-medium px-5 py-3">Last Activity</th>
               <th className="text-left font-medium px-5 py-3">Last Listed Price</th>
               <th className="text-left font-medium px-5 py-3">Latest Verified Sale</th>
-                            <th className="text-center font-medium px-5 py-3">Asset Type</th>
+              <th className="text-center font-medium px-5 py-3">Asset Type</th>
               <th className="w-[90px] text-center font-medium px-5 py-3">Source</th>
               <th className="text-left font-medium px-5 py-3">Provider</th>
               <th className="text-right font-medium px-5 py-3">Last Checked</th>
             </tr>
           </thead>
 
-          <tbody className="divide-y divide-border">
+          <tbody className="divide-y divide-border/60">
             {loading ? (
-              <tr><td colSpan={10} className="px-5 py-8 text-sm text-muted-foreground">Loading NFTs...</td></tr>
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i} className={i % 2 === 1 ? "bg-surface/30" : ""}>
+                  <td colSpan={10} className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-md bg-muted/60 animate-pulse" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-3 w-1/3 rounded bg-muted/60 animate-pulse" />
+                        <div className="h-2.5 w-1/4 rounded bg-muted/40 animate-pulse" />
+                      </div>
+                      <div className="hidden md:flex gap-3">
+                        <div className="h-3 w-16 rounded bg-muted/40 animate-pulse" />
+                        <div className="h-3 w-20 rounded bg-muted/40 animate-pulse" />
+                        <div className="h-3 w-14 rounded bg-muted/40 animate-pulse" />
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ))
             ) : nfts.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-5 py-8 text-sm text-muted-foreground">
-                  <div className="space-y-1">
-                    <div>No NFTs match these filters.</div>
-                    {mintLookupNote && <div className="text-xs">{mintLookupNote}</div>}
+                <td colSpan={10} className="px-5 py-16">
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60 text-muted-foreground">
+                      <Search className="h-5 w-5" />
+                    </div>
+                    <div className="text-sm font-medium">No NFTs match these filters.</div>
+                    {mintLookupNote && <div className="text-xs text-muted-foreground">{mintLookupNote}</div>}
+                    {activeFilters.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCategory("all"); setAssetType("all"); setStatus("all");
+                          setSourceCollection(""); setSearch("");
+                          setIncludeOther(false); setIncludeUnknown(false);
+                          setWithoutBid(false); setMissingImage(false);
+                        }}
+                        className="mt-2 text-xs text-primary hover:underline"
+                      >
+                        Clear all filters
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
-            ) : nfts.map((nft) => {
+            ) : nfts.map((nft, index) => {
               const latestMarketPrice = fmtPrice(nft.latestMarketPriceSol, nft.latestMarketPriceUsd);
               const lastSale = fmtPrice(nft.lastSalePriceSol, nft.lastSalePriceUsd);
-              console.log("[NFT LIST][ROW]", {
-                mint: nft.mint,
-                ownerPrefix: ownerPrefix(nft.owner),
-                latestMarketPriceSol: nft.latestMarketPriceSol,
-                lastSalePriceSol: nft.lastSalePriceSol,
-              });
               return (
-                
-                <tr key={nft.mint} className="hover:bg-surface-raised/40 transition">
+                <tr
+                  key={nft.mint}
+                  className={`group transition-colors ${index % 2 === 1 ? "bg-surface/30" : ""} hover:bg-surface-raised/60`}
+                >
                   <td className="w-[120px] px-5 py-3 text-center text-muted-foreground">
                     <div className="flex w-full items-center justify-center">
                       {categoryIcon(nft.category) ? (
@@ -635,7 +759,7 @@ export function NftListPage() {
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
                     <div className="flex flex-col gap-1">
-                      <span className={`w-fit rounded border px-2 py-1 text-xs ${activityClass(nft.lastActivityType)}`}>
+                      <span className={activityClass(nft.lastActivityType)}>
                         {activityLabel(nft.lastActivityType)}
                       </span>
                       {nft.lastActivityAt ? <span><RelativeTime iso={nft.lastActivityAt} /></span> : <span>Not detected</span>}
@@ -698,26 +822,34 @@ export function NftListPage() {
             })}
           </tbody>
         </table>
+        </div>
 
-        <div className="border-t border-border px-5 py-3 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+        <div className="border-t border-border px-5 py-3 flex items-center justify-between gap-3 text-sm">
           <button
             type="button"
             disabled={!hasPrevious || loading}
             onClick={() => setPage((value) => Math.max(value - 1, 1))}
-            className="rounded-md border border-border bg-surface px-3 py-1.5 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-muted-foreground hover:bg-surface-raised hover:text-foreground disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-muted-foreground transition"
           >
+            <ChevronLeft className="h-3.5 w-3.5" />
             Previous
           </button>
 
-          <span>Page {page}</span>
+          <span className="text-xs text-muted-foreground">
+            Page <span className="font-mono tabular-nums text-foreground">{page}</span>
+            {total > 0 && (
+              <> of <span className="font-mono tabular-nums text-foreground">{Math.max(1, Math.ceil(total / limit))}</span></>
+            )}
+          </span>
 
           <button
             type="button"
             disabled={!hasNext || loading}
             onClick={() => setPage((value) => value + 1)}
-            className="rounded-md border border-border bg-surface px-3 py-1.5 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-muted-foreground hover:bg-surface-raised hover:text-foreground disabled:opacity-40 disabled:hover:bg-surface disabled:hover:text-muted-foreground transition"
           >
             Next
+            <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -725,12 +857,71 @@ export function NftListPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+const STAT_ACCENTS = {
+  primary: "bg-primary/10 ring-primary/30 text-primary",
+  emerald: "bg-emerald-500/10 ring-emerald-500/30 text-emerald-400",
+  amber: "bg-amber-500/10 ring-amber-500/30 text-amber-400",
+} as const;
+
+function Stat({
+  label,
+  value,
+  icon,
+  accent = "primary",
+}: {
+  label: string;
+  value: string;
+  icon?: React.ReactNode;
+  accent?: keyof typeof STAT_ACCENTS;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1.5 text-2xl font-semibold font-mono tabular-nums">{value}</div>
+    <div className="group relative overflow-hidden rounded-lg border border-border bg-card p-5 transition hover:border-border/80 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        {icon && (
+          <div className={`flex h-7 w-7 items-center justify-center rounded-md ring-1 ${STAT_ACCENTS[accent]}`}>
+            {icon}
+          </div>
+        )}
+      </div>
+      <div className="mt-2 text-2xl font-semibold font-mono tabular-nums">{value}</div>
     </div>
+  );
+}
+
+function ToggleChip({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      aria-pressed={checked}
+      className={`h-10 rounded-md border px-3 text-sm flex items-center justify-between gap-3 transition ${
+        checked
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "border-border bg-surface text-muted-foreground hover:border-border/80 hover:text-foreground"
+      }`}
+    >
+      <span>{label}</span>
+      <span
+        className={`flex h-4 w-4 items-center justify-center rounded-sm border ${
+          checked ? "border-primary bg-primary text-primary-foreground" : "border-border bg-surface-raised"
+        }`}
+      >
+        {checked && (
+          <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="3">
+            <path d="M3 8l3.5 3.5L13 5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -769,30 +960,52 @@ function MarketActivityCard({ loading, stats }: { loading: boolean; stats: NftLi
   ];
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 sm:col-span-2">
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-xs text-muted-foreground">Market & NFT Activity</div>
-        <div className="text-xs text-muted-foreground">Last 10 minutes</div>
+    <div className="group relative overflow-hidden rounded-lg border border-border bg-card p-4 sm:col-span-2 transition hover:border-border/80 hover:shadow-md">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/10 ring-1 ring-amber-500/30 text-amber-400">
+          <TrendingUp className="h-3.5 w-3.5" />
+        </div>
+        <span>Market &amp; NFT Activity</span>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-1.5 lg:grid-cols-5">
-        {rows.map((row) => (
-          <div key={row.label} className="rounded-md border border-border/70 bg-surface px-2.5 py-1.5">
-            <div className="min-w-0">
-              <span className={`inline-flex max-w-full rounded border px-1.5 py-0.5 text-[10px] leading-4 ${row.toneClass}`}>
-                {row.label}
-              </span>
-            </div>
-            <div className="mt-1.5 flex items-end justify-between gap-2">
-              <div className="font-mono text-base font-semibold leading-none tabular-nums">
-                {loading ? "..." : row.total.toLocaleString("en-US")}
+      <div className="mt-3 grid grid-cols-3 gap-2 lg:grid-cols-5">
+        {rows.map((row) => {
+          const inner = (
+            <>
+              <div>
+                <span className={`inline-flex max-w-full rounded border px-1.5 py-0.5 text-[10px] leading-4 ${row.toneClass}`}>
+                  {row.label}
+                </span>
               </div>
-              <div className="font-mono text-xs text-muted-foreground tabular-nums">
-                {loading ? "..." : row.recent.toLocaleString("en-US")}
+              <div className="mt-2">
+                <div className="font-mono text-base font-semibold leading-none tabular-nums">
+                  {loading ? "···" : row.total.toLocaleString("en-US")}
+                </div>
               </div>
+            </>
+          );
+
+          const cellClass = "group/cell rounded-md border border-border/60 bg-surface px-2.5 py-2 transition hover:border-border hover:bg-surface-raised";
+
+          if (row.label === "Listed") {
+            return (
+              <Link key={row.label} to="/verified-listed" className={`${cellClass} block`}>
+                {inner}
+                {stats.listingUnknownTotal > 0 && (
+                  <div className="mt-1.5 text-[10px] leading-tight text-muted-foreground/60">
+                    {stats.listingUnknownTotal.toLocaleString("en-US")} not checked · Provider not connected
+                  </div>
+                )}
+              </Link>
+            );
+          }
+
+          return (
+            <div key={row.label} className={cellClass}>
+              {inner}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

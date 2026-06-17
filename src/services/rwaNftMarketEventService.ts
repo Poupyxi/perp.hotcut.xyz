@@ -158,6 +158,8 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         listed_price_sol = NULL,
         listed_price_usd = NULL,
         listing_marketplace = NULL,
+        listing_verification_status = 'verified_unlisted',
+        last_listing_checked_at = ?,
         last_sale_price_sol = ?,
         last_sale_price_usd = ?,
         last_sale_at = ?,
@@ -176,6 +178,7 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         market_updated_at = ?
       WHERE mint = ?
     `).run(
+      timestamp,
       event.priceSol,
       event.priceUsd,
       event.eventAt,
@@ -203,13 +206,15 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         listed_price_usd = ?,
         listing_marketplace = ?,
         listing_updated_at = ?,
+        listing_verification_status = 'verified_listed',
+        last_listing_checked_at = ?,
         current_status = 'listed',
         latest_market_price_sol = COALESCE(latest_market_price_sol, ?),
         latest_market_price_usd = COALESCE(latest_market_price_usd, ?),
         latest_marketplace = COALESCE(latest_marketplace, ?),
         market_updated_at = ?
       WHERE mint = ?
-    `).run(event.priceSol, event.priceUsd, event.marketplace, event.eventAt, event.priceSol, event.priceUsd, event.marketplace, timestamp, event.mint);
+    `).run(event.priceSol, event.priceUsd, event.marketplace, event.eventAt, timestamp, event.priceSol, event.priceUsd, event.marketplace, timestamp, event.mint);
     return;
   }
 
@@ -220,10 +225,12 @@ export async function updateNftAssetFromMarketEvent(event: RwaNftMarketEvent): P
         listed_price_sol = NULL,
         listed_price_usd = NULL,
         listing_marketplace = NULL,
+        listing_verification_status = 'verified_unlisted',
+        last_listing_checked_at = ?,
         current_status = CASE WHEN last_sale_tx_signature IS NOT NULL THEN current_status ELSE 'unlisted' END,
         market_updated_at = ?
       WHERE mint = ?
-    `).run(timestamp, event.mint);
+    `).run(timestamp, timestamp, event.mint);
     return;
   }
 
