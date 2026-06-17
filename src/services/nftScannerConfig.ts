@@ -15,6 +15,12 @@ export type NftScannerConfig = {
   nftListEnrichFocusMint: string | null;
   nftListEnrichTtlSeconds: number;
   nftListEnrichRefreshCooldownSeconds: number;
+  nftListEnrichListingOnly: boolean;
+  nftListEnrichSignaturesLimit: number;
+  scanListedIntervalSeconds: number;
+  scanHotIntervalSeconds: number;
+  scanWarmIntervalSeconds: number;
+  scanColdIntervalSeconds: number;
   trackedCollections: string[];
   magicEdenCollectionSymbols: string[];
   tensorCollectionSlugs: string[];
@@ -27,7 +33,7 @@ export type NftScannerConfig = {
   packOpeningKeywords: string[];
 };
 
-function env(): RuntimeEnv {
+export function env(): RuntimeEnv {
   return (globalThis as unknown as { process?: { env?: RuntimeEnv } }).process?.env ?? {};
 }
 
@@ -84,6 +90,12 @@ export function readNftScannerConfig(input: { dryRun?: boolean | null } = {}): N
     nftListEnrichFocusMint: stringEnv("NFT_LIST_ENRICH_FOCUS_MINT"),
     nftListEnrichTtlSeconds: numberEnv("NFT_LIST_ENRICH_TTL_SECONDS", 600),
     nftListEnrichRefreshCooldownSeconds: numberEnv("NFT_LIST_ENRICH_REFRESH_COOLDOWN_SECONDS", 30),
+    nftListEnrichListingOnly: boolEnv("NFT_LIST_ENRICH_LISTING_ONLY", false),
+    nftListEnrichSignaturesLimit: numberEnv("NFT_LIST_ENRICH_SIGNATURES_LIMIT", 1),
+    scanListedIntervalSeconds: numberEnv("SCAN_LISTED_INTERVAL_SECONDS", 120, 30),
+    scanHotIntervalSeconds: numberEnv("SCAN_HOT_INTERVAL_SECONDS", 600, 60),
+    scanWarmIntervalSeconds: numberEnv("SCAN_WARM_INTERVAL_SECONDS", 3600, 300),
+    scanColdIntervalSeconds: numberEnv("SCAN_COLD_INTERVAL_SECONDS", 43200, 3600),
     trackedCollections: csvEnv("TRACKED_COLLECTIONS", ["pokemon-cards", "one-piece-cards", "nba-cards", "nfl-cards", "nhl-cards"]),
     magicEdenCollectionSymbols: csvEnv("MAGIC_EDEN_COLLECTION_SYMBOLS"),
     tensorCollectionSlugs: csvEnv("TENSOR_COLLECTION_SLUGS"),
