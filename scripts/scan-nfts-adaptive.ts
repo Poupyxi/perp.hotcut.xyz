@@ -187,7 +187,7 @@ async function main() {
         WHEN last_activity_at >= datetime('now', '-7 days') THEN 2
         ELSE 3
       END ASC,
-      CASE WHEN category = 'pokemon-cards' THEN 0 ELSE 1 END ASC,
+      CASE WHEN category = 'pokemon' THEN 0 ELSE 1 END ASC,
       COALESCE(next_scan_at, '1970-01-01') ASC
   `;
   if (limit > 0) {

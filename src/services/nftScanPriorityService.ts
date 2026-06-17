@@ -76,9 +76,9 @@ export function priorityWeight(priority: ScanPriority): number {
   }
 }
 
-/** Category ordering — pokemon-cards first within same priority. */
+/** Category ordering — pokemon first within same priority. */
 export function categoryWeight(category: string | null | undefined): number {
-  return category === "pokemon-cards" ? 0 : 1;
+  return category === "pokemon" ? 0 : 1;
 }
 
 /** Provider call strategy per priority. */
