@@ -135,6 +135,45 @@ function checkStandardNftTransfer(tx: unknown): boolean {
   return false;
 }
 
+/**
+ * Detect explicit delisting/cancellation evidence in transaction
+ * Looks for: cancel listing instructions, revoke instructions, marketplace-specific delists
+ */
+function hasExplicitDelistingEvidence(tx: unknown): boolean {
+  if (!tx || typeof tx !== "object") return false;
+
+  const txObj = tx as Record<string, unknown>;
+
+  // Check transaction logs for delisting keywords
+  if (txObj.meta && typeof txObj.meta === "object") {
+    const meta = txObj.meta as { logMessages?: string[] };
+    if (Array.isArray(meta.logMessages)) {
+      const logs = meta.logMessages.join(" ").toLowerCase();
+      // Look for delisting/cancellation indicators
+      if (
+        logs.includes("cancel") ||
+        logs.includes("revoke") ||
+        logs.includes("delist") ||
+        logs.includes("listing_canceled") ||
+        logs.includes("listing closed")
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // Check instruction data for marketplace-specific cancel operations
+  if (txObj.transaction && typeof txObj.transaction === "object") {
+    const tx_obj = txObj.transaction as Record<string, unknown>;
+    if (Array.isArray(tx_obj.message)) {
+      // Simplified check; ideally would decode instruction data
+      return false;
+    }
+  }
+
+  return false;
+}
+
 async function getHeliusTransaction(signature: string): Promise<{ tx: HeliusTransaction | null; error?: string }> {
   if (!hasHeliusApiKey()) return { tx: null, error: "No Helius API key available" };
 
@@ -152,7 +191,7 @@ async function getHeliusTransaction(signature: string): Promise<{ tx: HeliusTran
           params: [
             signature,
             {
-              encoding: "json",
+              encoding: "jsonParsed",
               maxSupportedTransactionVersion: 0,
             },
           ],
@@ -266,6 +305,11 @@ export async function verifyDisappearedListing(input: {
     timestamp: string | null;
   } | null = null;
 
+  let delistingEvidence: {
+    signature: string;
+    timestamp: string | null;
+  } | null = null;
+
   let hasRecentActivity = false;
 
   for (const sig of signaturesResult.signatures.slice(0, 5)) {
@@ -280,6 +324,18 @@ export async function verifyDisappearedListing(input: {
 
     const tx = txResult.tx;
     hasRecentActivity = true;
+
+    // Check for explicit delisting evidence first (when owner unchanged)
+    if (!ownerChanged && hasExplicitDelistingEvidence(tx)) {
+      evidence.push(`Explicit delisting/cancellation evidence found in ${sig}`);
+      if (!delistingEvidence) {
+        const timestamp = tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null;
+        delistingEvidence = {
+          signature: sig,
+          timestamp,
+        };
+      }
+    }
 
     // Detect NFT transfer (standard or compressed)
     const hasNftTransfer = isCompressed ? isCompressedNftTransfer(tx) : checkStandardNftTransfer(tx);
@@ -369,16 +425,29 @@ export async function verifyDisappearedListing(input: {
     };
   } else {
     // Owner unchanged
-    if (hasRecentActivity) {
-      evidence.push("⚠ Activity detected but owner unchanged");
+    if (delistingEvidence) {
+      evidence.push("✓ DELISTED: Explicit cancellation/delisting evidence found");
+      return {
+        result: "delisted",
+        txHash: delistingEvidence.signature,
+        timestamp: delistingEvidence.timestamp,
+        manualReview: false,
+        evidence,
+      };
     }
 
-    // DELISTED: owner unchanged + listing disappeared
+    // UNKNOWN: owner unchanged without explicit cancellation evidence
+    if (hasRecentActivity) {
+      evidence.push("✗ UNKNOWN: Activity detected but owner unchanged, no explicit cancellation evidence");
+    } else {
+      evidence.push("✗ UNKNOWN: Listing disappeared, owner unchanged, no explicit cancellation evidence");
+    }
+
     return {
-      result: "delisted",
+      result: "unknown",
       txHash: null,
       timestamp: null,
-      manualReview: false,
+      manualReview: true,
       evidence,
     };
   }
