@@ -2,8 +2,8 @@ import type { RwaNftMarketEvent } from "@/types/rwaNftMarket";
 import { getNftDb } from "./nftSqliteDb";
 import { fetchWithHeliusKey, hasHeliusApiKey } from "./heliusApiKeyRotation";
 import { saveRwaNftMarketEvent } from "./rwaNftMarketEventService";
-import { isCompressedNft, extractCompressedNftInfo, isCompressedNftTransfer } from "./heliusCompressedNftParser";
-import { hasPaymentEvidence, analyzePaymentEvidence, detectTokenTransfers, detectNativeTransfers } from "./heliusSplTokenDetector";
+import { isCompressedNft, isCompressedNftTransfer } from "./heliusCompressedNftParser";
+import { hasValidPaymentEvidence, analyzePaymentEvidence } from "./heliusSolUsdcPaymentDetector";
 
 export type VerificationResult = "sold" | "transferred" | "delisted" | "unknown";
 
@@ -117,6 +117,22 @@ async function getHeliusSignaturesForAsset(mint: string): Promise<{ signatures: 
   } catch (error) {
     return { signatures: [], error: error instanceof Error ? error.message : "Network error" };
   }
+}
+
+function checkStandardNftTransfer(tx: unknown): boolean {
+  if (!tx || typeof tx !== "object") return false;
+
+  const txObj = tx as HeliusTransaction;
+
+  // Standard NFT transfer: check for token transfers
+  if (txObj.meta && typeof txObj.meta === "object") {
+    const meta = txObj.meta as { postTokenBalances?: unknown[] };
+    if (Array.isArray(meta.postTokenBalances) && meta.postTokenBalances.length > 0) {
+      return true; // Token movement detected
+    }
+  }
+
+  return false;
 }
 
 async function getHeliusTransaction(signature: string): Promise<{ tx: HeliusTransaction | null; error?: string }> {
@@ -236,7 +252,20 @@ export async function verifyDisappearedListing(input: {
   }
 
   // Step 3: Analyze recent transactions (top 5)
-  let bestTransferTx: { signature: string; hasTransfer: boolean; hasPayment: boolean; timestamp: string | null } | null = null;
+  let bestSaleCandidate: {
+    signature: string;
+    hasNftTransfer: boolean;
+    hasValidPayment: boolean;
+    paymentType?: string; // "SOL" or "USDC"
+    paymentAmount?: number;
+    timestamp: string | null;
+  } | null = null;
+
+  let bestTransferCandidate: {
+    signature: string;
+    timestamp: string | null;
+  } | null = null;
+
   let hasRecentActivity = false;
 
   for (const sig of signaturesResult.signatures.slice(0, 5)) {
@@ -253,66 +282,78 @@ export async function verifyDisappearedListing(input: {
     hasRecentActivity = true;
 
     // Detect NFT transfer (standard or compressed)
-    const hasNftTransfer = isCompressed
-      ? isCompressedNftTransfer(tx)
-      : detectNativeTransfers(tx).count > 0 || detectTokenTransfers(tx).length > 0;
+    const hasNftTransfer = isCompressed ? isCompressedNftTransfer(tx) : checkStandardNftTransfer(tx);
 
-    // Detect payment evidence (SOL or SPL tokens)
-    const hasPayment = hasPaymentEvidence(tx);
+    if (!hasNftTransfer) continue;
 
-    if (hasNftTransfer) {
-      evidence.push(`NFT transfer detected in ${sig}`);
+    evidence.push(`NFT transfer detected in ${sig}`);
 
-      if (hasPayment) {
-        evidence.push(`Payment evidence found in ${sig}`);
-        if (!bestTransferTx) {
-          const timestamp = tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null;
-          bestTransferTx = {
-            signature: sig,
-            hasTransfer: true,
-            hasPayment: true,
-            timestamp,
-          };
-        }
-      } else if (!bestTransferTx) {
+    // Analyze payment using balance comparison (SOL/USDC only)
+    const paymentEvidence = analyzePaymentEvidence(tx);
+    const hasValidPayment = paymentEvidence.hasSolPayment || paymentEvidence.hasUsdcPayment;
+
+    if (hasValidPayment) {
+      const paymentType = paymentEvidence.hasSolPayment ? "SOL" : "USDC";
+      const paymentAmount = paymentEvidence.hasSolPayment
+        ? paymentEvidence.solAmount / 1_000_000_000 // Convert lamports to SOL
+        : paymentEvidence.usdcAmount; // Already in USDC units
+
+      evidence.push(`✓ Valid ${paymentType} payment detected: ${paymentAmount} in ${sig}`);
+
+      if (!bestSaleCandidate) {
         const timestamp = tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null;
-        bestTransferTx = {
+        bestSaleCandidate = {
           signature: sig,
-          hasTransfer: true,
-          hasPayment: false,
+          hasNftTransfer: true,
+          hasValidPayment: true,
+          paymentType,
+          paymentAmount,
+          timestamp,
+        };
+      }
+    } else {
+      evidence.push(`Transfer detected but no valid SOL/USDC payment in ${sig}`);
+
+      if (!bestTransferCandidate) {
+        const timestamp = tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null;
+        bestTransferCandidate = {
+          signature: sig,
           timestamp,
         };
       }
     }
 
-    // Early exit if we found a clear sale
-    if (bestTransferTx?.hasPayment) break;
+    // Early exit if we found a clear sale (both transfer + valid payment)
+    if (bestSaleCandidate?.hasValidPayment) break;
   }
 
   // Step 4: Classification logic (strict rules)
   if (ownerChanged) {
-    if (bestTransferTx?.hasPayment && bestTransferTx?.hasTransfer) {
-      evidence.push("✓ SOLD: Owner changed + NFT transfer + payment evidence");
+    // SOLD: owner changed + NFT transfer + valid SOL/USDC payment
+    if (bestSaleCandidate?.hasValidPayment && bestSaleCandidate?.hasNftTransfer) {
+      evidence.push(`✓ SOLD: Owner changed + NFT transfer + ${bestSaleCandidate.paymentType} payment`);
       return {
         result: "sold",
-        txHash: bestTransferTx.signature,
-        timestamp: bestTransferTx.timestamp,
+        txHash: bestSaleCandidate.signature,
+        timestamp: bestSaleCandidate.timestamp,
         manualReview: false,
         evidence,
       };
     }
 
-    if (bestTransferTx?.hasTransfer && !bestTransferTx?.hasPayment) {
-      evidence.push("⚠ TRANSFERRED: Owner changed + NFT transfer + NO payment");
+    // TRANSFERRED: owner changed + NFT transfer + no valid payment
+    if (bestTransferCandidate && !bestSaleCandidate?.hasValidPayment) {
+      evidence.push("⚠ TRANSFERRED: Owner changed + NFT transfer + NO valid SOL/USDC payment");
       return {
         result: "transferred",
-        txHash: bestTransferTx.signature,
-        timestamp: bestTransferTx.timestamp,
+        txHash: bestTransferCandidate.signature,
+        timestamp: bestTransferCandidate.timestamp,
         manualReview: false,
         evidence,
       };
     }
 
+    // UNKNOWN: owner changed but insufficient evidence
     if (hasRecentActivity) {
       evidence.push("✗ UNKNOWN: Owner changed but transfer/payment evidence incomplete");
     } else {
@@ -332,7 +373,7 @@ export async function verifyDisappearedListing(input: {
       evidence.push("⚠ Activity detected but owner unchanged");
     }
 
-    // Delisted: owner unchanged + listing disappeared (no marketplace evidence)
+    // DELISTED: owner unchanged + listing disappeared
     return {
       result: "delisted",
       txHash: null,
