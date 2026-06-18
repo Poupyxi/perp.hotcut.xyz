@@ -43,15 +43,17 @@ async function fetchCollectorCryptListingsPage(page: number, limit: number): Pro
   totalPages: number;
   hasMore: boolean;
 }> {
-  const apiUrl = process.env.COLLECTOR_CRYPT_API_URL;
-  if (!apiUrl) {
-    throw new Error("COLLECTOR_CRYPT_API_URL not configured");
-  }
+  // Use official Collector Crypt API
+  const baseUrl = "https://api.collectorcrypt.com";
+  const endpoint = "/marketplace";
 
-  const listingsPath = process.env.COLLECTOR_CRYPT_LISTINGS_PATH || "/listings";
-  const url = new URL(listingsPath, apiUrl);
+  const url = new URL(endpoint, baseUrl);
+  // Official API uses: categories, marketplaceStatus, marketplaceSource, page, step
+  url.searchParams.set("categories", "Pokemon");
+  url.searchParams.set("marketplaceStatus", "Buy now");
+  url.searchParams.set("marketplaceSource", "CC");
   url.searchParams.set("page", String(page));
-  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("step", String(limit));
 
   const response = await fetch(url.toString(), {
     headers: { accept: "application/json" },
@@ -69,19 +71,13 @@ async function fetchCollectorCryptListingsPage(page: number, limit: number): Pro
 
   const obj = data as Record<string, unknown>;
 
-  // Extract listings array
-  let items: unknown[] = [];
-  if (Array.isArray(obj.listings)) {
-    items = obj.listings;
-  } else if (Array.isArray(obj.data)) {
-    items = obj.data;
-  } else if (Array.isArray(obj.items)) {
-    items = obj.items;
-  }
-
-  // Extract pagination info
-  const total = typeof obj.total === "number" ? obj.total : 0;
-  const totalPages = typeof obj.total_pages === "number" ? obj.total_pages : typeof obj.totalPages === "number" ? obj.totalPages : Math.ceil(total / limit);
+  // Official API response mapping:
+  // - listings array: filterNFtCard
+  // - total matching listings: findTotal
+  // - total pages: totalPages
+  const items = Array.isArray(obj.filterNFtCard) ? obj.filterNFtCard : [];
+  const total = typeof obj.findTotal === "number" ? obj.findTotal : 0;
+  const totalPages = typeof obj.totalPages === "number" ? obj.totalPages : Math.ceil(total / limit);
 
   const listings = normalizeListings(items);
   const hasMore = page < totalPages;
@@ -102,9 +98,25 @@ function normalizeListings(items: unknown[]): CollectorCryptListing[] {
 
     const obj = item as Record<string, unknown>;
 
-    // Extract required fields
-    const listingId = String(obj.listing_id || obj.id || obj.listingId || "").trim();
-    const mint = String(obj.mint || obj.assetMint || obj.nft_mint || "").trim();
+    // Official Collector Crypt API mapping:
+    // - mint: nftAddress
+    // - listing ID: listing.receiptId (fallback to listing.sellerId if missing)
+    // - price: listing.price
+    // - currency: listing.currency
+    // - marketplace: listing.marketplace
+    // - createdAt: listing.createdAt
+    // - updatedAt: listing.updatedAt
+    // - seller: owner.wallet
+
+    const mint = String(obj.nftAddress || "").trim();
+    const listingObj = obj.listing as Record<string, unknown> || {};
+    const ownerObj = obj.owner as Record<string, unknown> || {};
+
+    // ListingId: use receiptId if available, fallback to sellerId
+    let listingId = String(listingObj.receiptId || "").trim();
+    if (!listingId) {
+      listingId = String(listingObj.sellerId || "").trim();
+    }
 
     if (!listingId || !mint) continue;
 
@@ -112,12 +124,12 @@ function normalizeListings(items: unknown[]): CollectorCryptListing[] {
       provider: "collector-crypt",
       listingId,
       mint,
-      marketplace: String(obj.marketplace || obj.market || "").trim() || undefined,
-      price: typeof obj.price === "number" ? obj.price : typeof obj.price === "string" ? parseFloat(obj.price) : undefined,
-      currency: String(obj.currency || obj.symbol || "").trim() || undefined,
-      seller: String(obj.seller || obj.sellerWallet || obj.sellerAddress || "").trim() || undefined,
-      listedAt: String(obj.listedAt || obj.listed_at || obj.createdAt || obj.created_at || "").trim() || undefined,
-      updatedAt: String(obj.updatedAt || obj.updated_at || "").trim() || undefined,
+      marketplace: String(listingObj.marketplace || "").trim() || undefined,
+      price: typeof listingObj.price === "number" ? listingObj.price : typeof listingObj.price === "string" ? parseFloat(listingObj.price as string) : undefined,
+      currency: String(listingObj.currency || "").trim() || undefined,
+      seller: String(ownerObj.wallet || listingObj.sellerId || "").trim() || undefined,
+      listedAt: String(listingObj.createdAt || "").trim() || undefined,
+      updatedAt: String(listingObj.updatedAt || "").trim() || undefined,
       rawPayload: obj,
     };
 
@@ -278,38 +290,34 @@ export async function syncCollectorCryptSnapshot(): Promise<SyncResult> {
         totalAnnounced = pageData.total;
         pagesFetched = page;
 
-        // Store listings in transaction
-        const transaction = db.transaction((listings: CollectorCryptListing[], snapId: string) => {
-          for (const listing of listings) {
-            const listingId = `${snapId}:${listing.provider}:${listing.listingId}`;
-            const insertedAt = new Date().toISOString();
+        // Store listings
+        for (const listing of pageData.listings) {
+          const listingId = `${snapshotId}:${listing.provider}:${listing.listingId}`;
+          const insertedAt = new Date().toISOString();
 
-            db.prepare(
-              `INSERT INTO collector_crypt_listings (
-                id, provider, listing_id, mint, marketplace, listing_price, listing_currency, seller, listed_at, updated_at,
-                snapshot_id, listing_status, is_current_snapshot, raw_payload_json, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(
-              listingId,
-              listing.provider || "collector-crypt",
-              listing.listingId,
-              listing.mint,
-              listing.marketplace || null,
-              listing.price || null,
-              listing.currency || null,
-              listing.seller || null,
-              listing.listedAt || null,
-              listing.updatedAt || null,
-              snapId,
-              "active",
-              1,
-              listing.rawPayload ? stringifyJson(listing.rawPayload) : null,
-              insertedAt,
-            );
-          }
-        });
-
-        transaction(pageData.listings, snapshotId);
+          db.prepare(
+            `INSERT INTO collector_crypt_listings (
+              id, provider, listing_id, mint, marketplace, listing_price, listing_currency, seller, listed_at, updated_at,
+              snapshot_id, listing_status, is_current_snapshot, raw_payload_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            listingId,
+            listing.provider || "collector-crypt",
+            listing.listingId,
+            listing.mint,
+            listing.marketplace || null,
+            listing.price || null,
+            listing.currency || null,
+            listing.seller || null,
+            listing.listedAt || null,
+            listing.updatedAt || null,
+            snapshotId,
+            "active",
+            1,
+            listing.rawPayload ? stringifyJson(listing.rawPayload) : null,
+            insertedAt,
+          );
+        }
         totalStored += pageData.listings.length;
 
         hasMore = pageData.hasMore;
@@ -369,51 +377,47 @@ export async function syncCollectorCryptSnapshot(): Promise<SyncResult> {
 
         disappearedListingIds = comparison.disappeared.map((d) => d.listingId);
 
-        // Queue disappeared listings for verification in atomic transaction
-        const queueTransaction = db.transaction((disappearedItems: typeof comparison.disappeared) => {
-          for (const { provider, listingId, mint, previousListing } of disappearedItems) {
-            const queueId = `${provider}:${listingId}:${snapshotId}`;
-            const queueNow = new Date().toISOString();
+        // Queue disappeared listings for verification
+        for (const { provider, listingId, mint, previousListing } of comparison.disappeared) {
+          const queueId = `${provider}:${listingId}:${snapshotId}`;
+          const queueNow = new Date().toISOString();
 
-            // Check if already queued (avoid duplicates)
-            const existing = db
-              .prepare("SELECT id FROM collector_crypt_verification_queue WHERE provider=? AND listing_id=? AND status IN ('pending','in_progress')")
-              .get(provider, listingId);
+          // Check if already queued (avoid duplicates)
+          const existing = db
+            .prepare("SELECT id FROM collector_crypt_verification_queue WHERE provider=? AND listing_id=? AND status IN ('pending','in_progress')")
+            .get(provider, listingId);
 
-            if (!existing) {
-              db.prepare(
-                `INSERT INTO collector_crypt_verification_queue (
-                  id, provider, listing_id, mint, reason, previous_listing_price, previous_listing_at, previous_owner,
-                  status, attempt_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              ).run(
-                queueId,
-                provider,
-                listingId,
-                mint,
-                "disappeared_from_listing",
-                previousListing.price || null,
-                previousListing.listedAt || null,
-                previousListing.seller || null,
-                "pending",
-                0,
-                queueNow,
-                queueNow,
-              );
-            }
-          }
-
-          // Archive previous complete snapshot if new one is valid
-          if (previousSnapshot) {
-            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-            db.prepare("UPDATE collector_crypt_snapshots SET status='archived' WHERE id=? AND created_at < ?").run(
-              previousSnapshot.id,
-              sevenDaysAgo,
+          if (!existing) {
+            db.prepare(
+              `INSERT INTO collector_crypt_verification_queue (
+                id, provider, listing_id, mint, reason, previous_listing_price, previous_listing_at, previous_owner,
+                status, attempt_count, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              queueId,
+              provider,
+              listingId,
+              mint,
+              "disappeared_from_listing",
+              previousListing.price || null,
+              previousListing.listedAt || null,
+              previousListing.seller || null,
+              "pending",
+              0,
+              queueNow,
+              queueNow,
             );
           }
-        });
+        }
 
-        queueTransaction(comparison.disappeared);
+        // Archive previous complete snapshot if new one is valid
+        if (previousSnapshot) {
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          db.prepare("UPDATE collector_crypt_snapshots SET status='archived' WHERE id=? AND created_at < ?").run(
+            previousSnapshot.id,
+            sevenDaysAgo,
+          );
+        }
       }
     }
 
