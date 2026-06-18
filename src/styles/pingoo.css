@@ -118,7 +118,7 @@ button:disabled { cursor: not-allowed; }
   display: grid;
   grid-template-columns: 275px minmax(560px, 1fr) 330px;
   gap: 26px;
-  align-items: center;
+  align-items: start;
   position: relative;
   z-index: 2;
 }

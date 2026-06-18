@@ -2,17 +2,17 @@ import type { RwaNftMarketEvent } from "@/types/rwaNftMarket";
 import { getNftDb } from "./nftSqliteDb";
 import { fetchWithHeliusKey, hasHeliusApiKey } from "./heliusApiKeyRotation";
 import { saveRwaNftMarketEvent } from "./rwaNftMarketEventService";
+import { isCompressedNft, extractCompressedNftInfo, isCompressedNftTransfer } from "./heliusCompressedNftParser";
+import { hasPaymentEvidence, analyzePaymentEvidence, detectTokenTransfers, detectNativeTransfers } from "./heliusSplTokenDetector";
 
 export type VerificationResult = "sold" | "transferred" | "delisted" | "unknown";
 
-export interface DisappearedListingVerification {
+export interface VerificationEvidence {
   result: VerificationResult;
   txHash: string | null;
   timestamp: string | null;
+  manualReview: boolean;
   evidence: string[];
-  ownerChanged: boolean;
-  hasTransfer: boolean;
-  hasPayment: boolean;
 }
 
 interface HeliusAsset {
@@ -22,19 +22,8 @@ interface HeliusAsset {
     delegated: boolean;
     frozen: boolean;
   };
-}
-
-interface HeliusTransaction {
-  signature: string;
-  type?: string;
-  timestamp?: number;
-  nativeTransfers?: Array<{ fromUserAccount: string; toUserAccount: string; lamports: number }>;
-  tokenTransfers?: Array<{ fromUserAccount: string; toUserAccount: string; tokenAmount?: { decimals: number; amount?: string } }>;
-  instructions?: Array<{
-    programId?: string;
-    data?: string;
-    accounts?: string[];
-  }>;
+  state?: string;
+  [key: string]: unknown;
 }
 
 interface HeliusSignaturesResponse {
@@ -45,33 +34,29 @@ interface HeliusSignaturesResponse {
   }>;
 }
 
-interface HeliusEnhancedTransactionResponse {
-  result?: Array<{
-    signature: string;
-    type?: string;
-    timestamp?: number;
-    nativeTransfers?: Array<{ fromUserAccount: string; toUserAccount: string; lamports: number }>;
-    tokenTransfers?: Array<{ fromUserAccount: string; toUserAccount: string }>;
-    [key: string]: unknown;
-  }>;
+interface HeliusTransaction {
+  signature: string;
+  blockTime?: number;
+  slot?: number;
+  [key: string]: unknown;
 }
 
 const RETRY_DELAYS = [0, 30_000, 120_000]; // immediate, 30s, 2min
 const MAX_ATTEMPTS = 3;
 
-async function getHeliusOwner(mint: string): Promise<{ owner: string | null; error?: string }> {
-  if (!hasHeliusApiKey()) return { owner: null, error: "No Helius API key available" };
+async function getHeliusAsset(mint: string): Promise<{ asset: HeliusAsset | null; error?: string }> {
+  if (!hasHeliusApiKey()) return { asset: null, error: "No Helius API key available" };
 
   try {
     const response = await fetchWithHeliusKey({
-      label: "collector-crypt-owner-check",
+      label: "collector-crypt-get-asset",
       endpoint: "https://mainnet-core.helius-rpc.com/",
       init: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jsonrpc: "2.0",
-          id: "helius-owner-check",
+          id: "get-asset",
           method: "getAsset",
           params: {
             id: mint,
@@ -86,37 +71,32 @@ async function getHeliusOwner(mint: string): Promise<{ owner: string | null; err
     const data = (await response.json()) as { result?: HeliusAsset; error?: { message: string } };
 
     if (data.error) {
-      return { owner: null, error: data.error.message };
+      return { asset: null, error: data.error.message };
     }
 
-    return {
-      owner: data.result?.ownership?.owner || null,
-    };
+    return { asset: data.result || null };
   } catch (error) {
-    return { owner: null, error: error instanceof Error ? error.message : "Network error" };
+    return { asset: null, error: error instanceof Error ? error.message : "Network error" };
   }
 }
 
-async function getHeliusRecentActivity(mint: string): Promise<{
-  signatures: string[];
-  error?: string;
-}> {
+async function getHeliusSignaturesForAsset(mint: string): Promise<{ signatures: string[]; error?: string }> {
   if (!hasHeliusApiKey()) return { signatures: [], error: "No Helius API key available" };
 
   try {
     const response = await fetchWithHeliusKey({
-      label: "collector-crypt-signatures",
+      label: "collector-crypt-signatures-for-asset",
       endpoint: "https://mainnet-core.helius-rpc.com/",
       init: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jsonrpc: "2.0",
-          id: "helius-signatures",
+          id: "get-signatures",
           method: "getSignaturesForAsset",
           params: {
             id: mint,
-            limit: 10,
+            limit: 100, // Fetch up to 100 recent signatures
           },
         }),
       },
@@ -128,275 +108,237 @@ async function getHeliusRecentActivity(mint: string): Promise<{
       return { signatures: [], error: data.error.message };
     }
 
-    const result = (data as HeliusSignaturesResponse).result;
-    const signatures = (result || []).filter((tx) => tx.err === null).map((tx) => tx.signature);
+    const result = (data as HeliusSignaturesResponse).result || [];
+    const signatures = result
+      .filter((tx) => tx.err === null) // Only confirmed transactions
+      .map((tx) => tx.signature);
+
     return { signatures };
   } catch (error) {
     return { signatures: [], error: error instanceof Error ? error.message : "Network error" };
   }
 }
 
-async function getEnhancedTransactions(signatures: string[]): Promise<{
-  transactions: Array<{ signature: string; data: unknown }>;
-  error?: string;
-}> {
-  if (signatures.length === 0) {
-    return { transactions: [] };
-  }
-
-  if (!hasHeliusApiKey()) return { transactions: [], error: "No Helius API key available" };
+async function getHeliusTransaction(signature: string): Promise<{ tx: HeliusTransaction | null; error?: string }> {
+  if (!hasHeliusApiKey()) return { tx: null, error: "No Helius API key available" };
 
   try {
     const response = await fetchWithHeliusKey({
-      label: "collector-crypt-enhanced-tx",
-      endpoint: "https://api.helius.xyz/v0/transactions",
+      label: "collector-crypt-get-transaction",
+      endpoint: "https://mainnet-core.helius-rpc.com/",
       init: {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transactions: signatures.slice(0, 10),
+          jsonrpc: "2.0",
+          id: "get-transaction",
+          method: "getTransaction",
+          params: [
+            signature,
+            {
+              encoding: "json",
+              maxSupportedTransactionVersion: 0,
+            },
+          ],
         }),
       },
     });
 
-    const data = (await response.json()) as HeliusEnhancedTransactionResponse;
+    const data = (await response.json()) as { result?: HeliusTransaction; error?: { message: string } };
 
-    if (!data.result) {
-      return { transactions: [] };
+    if (data.error) {
+      return { tx: null, error: data.error.message };
     }
 
-    return {
-      transactions: data.result.map((tx) => ({
-        signature: tx.signature,
-        data: tx,
-      })),
-    };
+    return { tx: data.result || null };
   } catch (error) {
-    return { transactions: [], error: error instanceof Error ? error.message : "Network error" };
+    return { tx: null, error: error instanceof Error ? error.message : "Network error" };
   }
-}
-
-function analyzeTransactionForSaleIndicators(tx: unknown): {
-  hasTransfer: boolean;
-  hasPayment: boolean;
-  transferCount: number;
-  paymentCount: number;
-  paymentTotal: number;
-} {
-  if (!tx || typeof tx !== "object") {
-    return { hasTransfer: false, hasPayment: false, transferCount: 0, paymentCount: 0, paymentTotal: 0 };
-  }
-
-  const txObj = tx as Record<string, unknown>;
-  let transferCount = 0;
-  let paymentCount = 0;
-  let paymentTotal = 0;
-
-  // Check for native SOL transfers (payment indicators)
-  if (txObj.nativeTransfers && Array.isArray(txObj.nativeTransfers)) {
-    for (const transfer of txObj.nativeTransfers) {
-      if (transfer && typeof transfer === "object") {
-        const tr = transfer as Record<string, unknown>;
-        if (typeof tr.lamports === "number" && tr.lamports > 0) {
-          paymentCount++;
-          paymentTotal += tr.lamports;
-        }
-      }
-    }
-  }
-
-  // Check for token transfers (likely NFT transfer)
-  if (txObj.tokenTransfers && Array.isArray(txObj.tokenTransfers)) {
-    transferCount = txObj.tokenTransfers.length;
-  }
-
-  // Check transaction type hints
-  const typeStr = String(txObj.type || "").toLowerCase();
-  const hasMarketplaceType = typeStr.includes("sale") || typeStr.includes("marketplace") || typeStr.includes("nft");
-
-  return {
-    hasTransfer: transferCount > 0,
-    hasPayment: paymentCount > 0 || paymentTotal > 0,
-    transferCount,
-    paymentCount,
-    paymentTotal,
-  };
 }
 
 export async function verifyDisappearedListing(input: {
   mint: string;
-  previousListing: {
+  previousListing?: {
     price?: number;
     listedAt?: string;
     seller?: string;
   };
   previousOwner?: string;
-}): Promise<DisappearedListingVerification> {
+}): Promise<VerificationEvidence> {
   const evidence: string[] = [];
 
-  // Check current owner
-  const ownerResult = await getHeliusOwner(input.mint);
-  if (ownerResult.error) {
-    evidence.push(`Owner check failed: ${ownerResult.error}`);
+  // Step 1: Get current asset info and owner
+  const assetResult = await getHeliusAsset(input.mint);
+  if (assetResult.error) {
+    evidence.push(`Asset lookup failed: ${assetResult.error}`);
     return {
       result: "unknown",
       txHash: null,
       timestamp: null,
+      manualReview: true,
       evidence,
-      ownerChanged: false,
-      hasTransfer: false,
-      hasPayment: false,
     };
   }
 
-  const currentOwner = ownerResult.owner;
+  if (!assetResult.asset) {
+    evidence.push("Asset not found on blockchain");
+    return {
+      result: "unknown",
+      txHash: null,
+      timestamp: null,
+      manualReview: true,
+      evidence,
+    };
+  }
+
+  const asset = assetResult.asset;
+  const isCompressed = isCompressedNft(asset);
+  if (isCompressed) {
+    evidence.push("Asset is a compressed NFT (cNFT)");
+  }
+
+  const currentOwner = asset.ownership?.owner || null;
   const ownerChanged = input.previousOwner && currentOwner && input.previousOwner !== currentOwner;
 
   if (ownerChanged) {
     evidence.push(`Owner changed: ${input.previousOwner} → ${currentOwner}`);
+  } else if (currentOwner === input.previousOwner) {
+    evidence.push(`Owner unchanged: ${currentOwner}`);
   }
 
-  // Get recent activity
-  const activityResult = await getHeliusRecentActivity(input.mint);
-  if (activityResult.error && activityResult.signatures.length === 0) {
-    evidence.push(`Activity check failed: ${activityResult.error}`);
+  // Step 2: Get recent signatures
+  const signaturesResult = await getHeliusSignaturesForAsset(input.mint);
+  if (signaturesResult.error) {
+    evidence.push(`Signature lookup failed: ${signaturesResult.error}`);
+  }
+
+  if (signaturesResult.signatures.length === 0) {
+    evidence.push("No recent transactions found");
     if (!ownerChanged) {
-      // Owner unchanged and no activity = delisted
+      // Owner unchanged + no recent activity = delisted
       return {
         result: "delisted",
         txHash: null,
         timestamp: null,
+        manualReview: false,
         evidence,
-        ownerChanged: false,
-        hasTransfer: false,
-        hasPayment: false,
       };
     } else {
-      // Owner changed but no activity info = unknown
+      // Owner changed but no transactions = insufficient evidence
       return {
         result: "unknown",
         txHash: null,
         timestamp: null,
+        manualReview: true,
         evidence,
-        ownerChanged: true,
-        hasTransfer: false,
-        hasPayment: false,
       };
     }
   }
 
-  // Get enhanced transactions for analysis
-  const enhancedResult = await getEnhancedTransactions(activityResult.signatures);
-
-  if (enhancedResult.error && enhancedResult.transactions.length === 0) {
-    evidence.push(`Enhanced transaction fetch failed: ${enhancedResult.error}`);
-    if (!ownerChanged) {
-      return {
-        result: "delisted",
-        txHash: null,
-        timestamp: null,
-        evidence,
-        ownerChanged: false,
-        hasTransfer: false,
-        hasPayment: false,
-      };
-    }
-  }
-
-  // Analyze transactions for sale indicators
-  let bestSaleIndicator: {
-    signature: string;
-    hasTransfer: boolean;
-    hasPayment: boolean;
-  } | null = null;
+  // Step 3: Analyze recent transactions (top 5)
+  let bestTransferTx: { signature: string; hasTransfer: boolean; hasPayment: boolean; timestamp: string | null } | null = null;
   let hasRecentActivity = false;
 
-  for (const tx of enhancedResult.transactions) {
-    const analysis = analyzeTransactionForSaleIndicators(tx.data);
+  for (const sig of signaturesResult.signatures.slice(0, 5)) {
+    const txResult = await getHeliusTransaction(sig);
 
-    if (analysis.transferCount > 0 || analysis.paymentCount > 0) {
-      hasRecentActivity = true;
+    if (txResult.error) {
+      evidence.push(`Transaction ${sig} fetch failed: ${txResult.error}`);
+      continue;
+    }
 
-      // Look for transactions with both transfer and payment (sale indicator)
-      if (analysis.hasTransfer && analysis.hasPayment) {
-        if (!bestSaleIndicator) {
-          bestSaleIndicator = {
-            signature: tx.signature,
+    if (!txResult.tx) continue;
+
+    const tx = txResult.tx;
+    hasRecentActivity = true;
+
+    // Detect NFT transfer (standard or compressed)
+    const hasNftTransfer = isCompressed
+      ? isCompressedNftTransfer(tx)
+      : detectNativeTransfers(tx).count > 0 || detectTokenTransfers(tx).length > 0;
+
+    // Detect payment evidence (SOL or SPL tokens)
+    const hasPayment = hasPaymentEvidence(tx);
+
+    if (hasNftTransfer) {
+      evidence.push(`NFT transfer detected in ${sig}`);
+
+      if (hasPayment) {
+        evidence.push(`Payment evidence found in ${sig}`);
+        if (!bestTransferTx) {
+          const timestamp = tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null;
+          bestTransferTx = {
+            signature: sig,
             hasTransfer: true,
             hasPayment: true,
+            timestamp,
           };
         }
-      } else if (analysis.hasTransfer && !bestSaleIndicator) {
-        bestSaleIndicator = {
-          signature: tx.signature,
+      } else if (!bestTransferTx) {
+        const timestamp = tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null;
+        bestTransferTx = {
+          signature: sig,
           hasTransfer: true,
-          hasPayment: analysis.hasPayment,
+          hasPayment: false,
+          timestamp,
         };
       }
     }
+
+    // Early exit if we found a clear sale
+    if (bestTransferTx?.hasPayment) break;
   }
 
-  // Decision logic
+  // Step 4: Classification logic (strict rules)
   if (ownerChanged) {
-    if (bestSaleIndicator?.hasPayment) {
-      evidence.push(`Sale indicators found: transfer + payment in ${bestSaleIndicator.signature}`);
+    if (bestTransferTx?.hasPayment && bestTransferTx?.hasTransfer) {
+      evidence.push("✓ SOLD: Owner changed + NFT transfer + payment evidence");
       return {
         result: "sold",
-        txHash: bestSaleIndicator.signature,
-        timestamp: new Date().toISOString(),
+        txHash: bestTransferTx.signature,
+        timestamp: bestTransferTx.timestamp,
+        manualReview: false,
         evidence,
-        ownerChanged: true,
-        hasTransfer: true,
-        hasPayment: true,
       };
-    } else if (bestSaleIndicator?.hasTransfer) {
-      evidence.push(`Transfer detected without payment in ${bestSaleIndicator.signature}`);
+    }
+
+    if (bestTransferTx?.hasTransfer && !bestTransferTx?.hasPayment) {
+      evidence.push("⚠ TRANSFERRED: Owner changed + NFT transfer + NO payment");
       return {
         result: "transferred",
-        txHash: bestSaleIndicator.signature,
-        timestamp: new Date().toISOString(),
+        txHash: bestTransferTx.signature,
+        timestamp: bestTransferTx.timestamp,
+        manualReview: false,
         evidence,
-        ownerChanged: true,
-        hasTransfer: true,
-        hasPayment: false,
-      };
-    } else if (hasRecentActivity) {
-      evidence.push("Owner changed but no transfer/payment evidence found");
-      return {
-        result: "unknown",
-        txHash: null,
-        timestamp: null,
-        evidence,
-        ownerChanged: true,
-        hasTransfer: false,
-        hasPayment: false,
-      };
-    } else {
-      evidence.push("Owner changed but no recent activity detected");
-      return {
-        result: "unknown",
-        txHash: null,
-        timestamp: null,
-        evidence,
-        ownerChanged: true,
-        hasTransfer: false,
-        hasPayment: false,
       };
     }
+
+    if (hasRecentActivity) {
+      evidence.push("✗ UNKNOWN: Owner changed but transfer/payment evidence incomplete");
+    } else {
+      evidence.push("✗ UNKNOWN: Owner changed but no recent activity");
+    }
+
+    return {
+      result: "unknown",
+      txHash: null,
+      timestamp: null,
+      manualReview: true,
+      evidence,
+    };
   } else {
     // Owner unchanged
-    evidence.push("Owner unchanged");
     if (hasRecentActivity) {
-      evidence.push("Some activity detected but owner did not change");
+      evidence.push("⚠ Activity detected but owner unchanged");
     }
+
+    // Delisted: owner unchanged + listing disappeared (no marketplace evidence)
     return {
       result: "delisted",
       txHash: null,
       timestamp: null,
+      manualReview: false,
       evidence,
-      ownerChanged: false,
-      hasTransfer: false,
-      hasPayment: false,
     };
   }
 }
@@ -447,22 +389,32 @@ export async function processCollectorCryptVerificationQueue(): Promise<{
       const updateNow = new Date().toISOString();
 
       if (nextAttempt >= MAX_ATTEMPTS || verification.result !== "unknown") {
-        // Resolved or max attempts
+        // Resolved or max attempts reached
         db.prepare(
           `UPDATE collector_crypt_verification_queue SET
             status = 'resolved',
             result = ?,
             result_tx_hash = ?,
             result_timestamp = ?,
+            manual_review = ?,
             attempt_count = ?,
             last_attempt_at = ?,
             updated_at = ?
            WHERE id = ?`,
-        ).run(verification.result, verification.txHash, verification.timestamp, nextAttempt, updateNow, updateNow, item.id);
+        ).run(
+          verification.result,
+          verification.txHash,
+          verification.timestamp,
+          verification.manualReview ? 1 : 0,
+          nextAttempt,
+          updateNow,
+          updateNow,
+          item.id,
+        );
 
         resolved++;
 
-        // Also update collector_crypt_listings with verification result
+        // Update listing status
         db.prepare(
           `UPDATE collector_crypt_listings SET
             listing_status = ?,
@@ -471,32 +423,71 @@ export async function processCollectorCryptVerificationQueue(): Promise<{
             verification_timestamp = ?,
             updated_at = ?
            WHERE mint = ? AND is_current_snapshot = 0`,
-        ).run(`${verification.result}`, `verified_${verification.result}`, verification.txHash, verification.timestamp, updateNow, item.mint);
+        ).run(verification.result, `verified_${verification.result}`, verification.txHash, verification.timestamp, updateNow, item.mint);
 
-        // If sold, create SALE event
+        // Create appropriate event only if verification is confident
         if (verification.result === "sold" && verification.txHash) {
           const saleEvent: RwaNftMarketEvent = {
             mint: item.mint,
             eventType: "SALE",
-            priceSol: null, // DO NOT use previous_listing_price
+            priceSol: null,
             priceUsd: null,
             marketplace: "Collector Crypt",
             txSignature: verification.txHash,
-            buyer: null, // Only set if Helius provides verified buyer
+            buyer: null,
             seller: null,
             owner: null,
             eventAt: verification.timestamp || updateNow,
             source: "collector-crypt-verification",
-            rawPayload: {
-              reason: "listing_disappeared_helius_verified",
-              evidence: verification.evidence,
-            },
+            rawPayload: { evidence: verification.evidence },
           };
 
           try {
             await saveRwaNftMarketEvent(saleEvent, { includeStaging: true });
           } catch (error) {
-            console.error(`[Collector Crypt Verification] Failed to save SALE event for ${item.mint}:`, error);
+            console.error(`[Collector Crypt] Failed to save SALE event for ${item.mint}:`, error);
+          }
+        } else if (verification.result === "transferred" && verification.txHash) {
+          const transferEvent: RwaNftMarketEvent = {
+            mint: item.mint,
+            eventType: "TRANSFER",
+            priceSol: null,
+            priceUsd: null,
+            marketplace: null,
+            txSignature: verification.txHash,
+            buyer: null,
+            seller: null,
+            owner: null,
+            eventAt: verification.timestamp || updateNow,
+            source: "collector-crypt-verification",
+            rawPayload: { evidence: verification.evidence },
+          };
+
+          try {
+            await saveRwaNftMarketEvent(transferEvent, { includeStaging: true });
+          } catch (error) {
+            console.error(`[Collector Crypt] Failed to save TRANSFER event for ${item.mint}:`, error);
+          }
+        } else if (verification.result === "delisted") {
+          const delistEvent: RwaNftMarketEvent = {
+            mint: item.mint,
+            eventType: "DELISTED",
+            priceSol: null,
+            priceUsd: null,
+            marketplace: "Collector Crypt",
+            txSignature: null,
+            buyer: null,
+            seller: null,
+            owner: null,
+            eventAt: updateNow,
+            source: "collector-crypt-verification",
+            rawPayload: { evidence: verification.evidence },
+          };
+
+          try {
+            await saveRwaNftMarketEvent(delistEvent, { includeStaging: true });
+          } catch (error) {
+            console.error(`[Collector Crypt] Failed to save DELISTED event for ${item.mint}:`, error);
           }
         }
       } else {
@@ -517,16 +508,16 @@ export async function processCollectorCryptVerificationQueue(): Promise<{
       const errorMsg = error instanceof Error ? error.message : "unknown error";
       errors.push({ mint: item.mint, error: errorMsg });
 
-      // Mark as failed attempt
       const nextAttempt = item.attempt_count + 1;
       const updateNow = new Date().toISOString();
 
       if (nextAttempt >= MAX_ATTEMPTS) {
-        // Max attempts reached, mark as unknown
+        // Max attempts: mark as unknown with manual review
         db.prepare(
           `UPDATE collector_crypt_verification_queue SET
             status = 'resolved',
             result = 'unknown',
+            manual_review = 1,
             attempt_count = ?,
             last_attempt_at = ?,
             updated_at = ?
