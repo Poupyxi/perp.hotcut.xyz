@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Layers, Activity, List } from "lucide-react";
+import { LayoutDashboard, Layers, BadgeCheck, List, Dices, SlidersHorizontal } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -16,8 +16,13 @@ import {
 const nav = [
   { title: "Market Overview", url: "/dashboard", icon: LayoutDashboard },
   { title: "Markets", url: "/collections", icon: Layers },
-  { title: "Verified Sales", url: "/verified-sales", icon: Activity },
+  { title: "Listed NFTs", url: "/verified-listed", icon: BadgeCheck },
   { title: "NFT List", url: "/nft-list", icon: List },
+];
+
+const labNav = [
+  { title: "Gacha (devnet)", url: "/gacha", icon: Dices },
+  { title: "Control Panel", url: "/control-panel", icon: SlidersHorizontal },
 ];
 
 export function AppSidebar() {
@@ -44,6 +49,24 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {nav.map((item) => (
+                <SidebarMenuItem key={item.url}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Lab (devnet)</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {labNav.map((item) => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                     <Link to={item.url}>

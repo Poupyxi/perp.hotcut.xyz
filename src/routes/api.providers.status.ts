@@ -9,6 +9,8 @@ export const Route = createFileRoute("/api/providers/status")({
         const { getMintDiscoveryProviderStatusReport } = await import("@/services/nftMintDiscoveryConnectors");
         const { readNftScannerConfig, providerApiEnv } = await import("@/services/nftScannerConfig");
         const { getProviderScanStatuses } = await import("@/services/nftScannerStatusService");
+        const { probeSolscan } = await import("@/services/solscanNftActivityService");
+        await probeSolscan();
         const salesProviders = await getProviderStatusReport();
         const scannerConfig = readNftScannerConfig();
         return Response.json(

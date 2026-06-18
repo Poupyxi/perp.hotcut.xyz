@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { VerifiedSalesPage } from "@/components/app/VerifiedSalesPage";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/verified-sales")({
-  component: VerifiedSalesPage,
-  head: () => ({ meta: [{ title: "Verified Sales — Perp RWA" }] }),
+  beforeLoad: () => {
+    throw redirect({ to: "/verified-listed" });
+  },
 });

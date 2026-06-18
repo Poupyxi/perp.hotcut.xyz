@@ -1,0 +1,26 @@
+{
+  "packPriceSol": 0.05,
+  "refundRate": 0.80,
+  "decisionWindowSeconds": 60,
+  "fallbackOnAcceptFail": "refund",
+  "tiers": [
+    {
+      "name": "jackpot",
+      "valueMinSol": 0.09,
+      "valueMaxSol": 0.12,
+      "probability": 0.02
+    },
+    {
+      "name": "break_even",
+      "valueMinSol": 0.05,
+      "valueMaxSol": 0.065,
+      "probability": 0.50
+    },
+    {
+      "name": "basse",
+      "valueMinSol": 0.01,
+      "valueMaxSol": 0.02,
+      "probability": 0.48
+    }
+  ]
+}

@@ -112,6 +112,11 @@ export function publicGroupForAssetType(assetType: RwaCollectibleAssetType): Rwa
   return assetType === "card" ? "card" : "other";
 }
 
+const GRADING_PATTERN = /\b(?:psa|cgc|bgs|sgc|ace|gma|csg)\s*\.?\s*(?:10|9(?:\.\d)?|8(?:\.\d)?|7(?:\.\d)?|6(?:\.\d)?|5|4|3|2|1)\b/i;
+const CARD_NUMBER_PATTERN = /#\s*[a-z]{0,3}\d+/i;
+const CARD_YEAR_PATTERN = /\b(?:19|20)\d{2}\b/;
+const TCG_RARITY_PATTERN = /\b(?:vmax|vstar|gx|ex|secret rare|rainbow rare|full art|alt art|holo|reverse holo|first edition|1st edition|trainer gallery|illustration rare|special illustration rare)\b/i;
+
 export function detectCollectibleAssetType(nft: AssetTypeInput): RwaCollectibleAssetType {
   const haystack = normalize([
     nft.name,
@@ -125,7 +130,11 @@ export function detectCollectibleAssetType(nft: AssetTypeInput): RwaCollectibleA
   const hasSealed = includesAny(haystack, SEALED_KEYWORDS);
   const hasComic = includesAny(haystack, COMIC_KEYWORDS);
   const hasMerch = includesAny(haystack, MERCH_KEYWORDS);
-  const hasCard = includesAny(haystack, CARD_KEYWORDS);
+  const hasCardKeyword = includesAny(haystack, CARD_KEYWORDS);
+  const hasGrading = GRADING_PATTERN.test(haystack);
+  const hasTcgRarity = TCG_RARITY_PATTERN.test(haystack);
+  const hasCardNumber = CARD_NUMBER_PATTERN.test(haystack) && CARD_YEAR_PATTERN.test(haystack);
+  const hasCard = hasCardKeyword || hasGrading || hasTcgRarity || hasCardNumber;
 
   if (hasSealed) return "sealed";
   if (hasMerch) return "merch";

@@ -1,7 +1,7 @@
 import type { DiscoveredNFTMint, ProviderMintDiscoveryConnector } from "@/types/rwaNftMarket";
 import { heliusAssetsPage } from "./nftCollectionIngestionService";
 import { hasHeliusApiKey } from "./heliusApiKeyRotation";
-import { providerApiEnv } from "./nftScannerConfig";
+import { providerApiEnv, env } from "./nftScannerConfig";
 
 export type MintDiscoveryProviderStatusCode =
   | "live"

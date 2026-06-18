@@ -13,3 +13,9 @@ data/*.lock
 .nitro
 .wrangler
 *.log
+*.patch
+docs
+.lovable
+.prettierrc
+.prettierignore
+eslint.config.js

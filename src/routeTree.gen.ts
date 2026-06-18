@@ -53,6 +53,8 @@ import { Route as ApiGachaDecideRouteImport } from './routes/api.gacha.decide'
 import { Route as ApiGachaConfirmPaymentRouteImport } from './routes/api.gacha.confirm-payment'
 import { Route as ApiGachaAdminRouteImport } from './routes/api.gacha.admin'
 import { Route as ApiDiscoverNewMintsRouteImport } from './routes/api.discover.new-mints'
+import { Route as ApiCollectorCryptVerifyRouteImport } from './routes/api.collector-crypt.verify'
+import { Route as ApiCollectorCryptSyncRouteImport } from './routes/api.collector-crypt.sync'
 import { Route as AppCollectionsSlugRouteImport } from './routes/_app.collections.$slug'
 import { Route as ApiIndexPokemonHistoryRouteImport } from './routes/api.index.pokemon.history'
 import { Route as ApiWebhooksHeliusNftEventsRouteImport } from './routes/api.webhooks.helius.nft-events'
@@ -283,6 +285,16 @@ const ApiDiscoverNewMintsRoute = ApiDiscoverNewMintsRouteImport.update({
   path: '/api/discover/new-mints',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCollectorCryptVerifyRoute = ApiCollectorCryptVerifyRouteImport.update({
+  id: '/api/collector-crypt/verify',
+  path: '/api/collector-crypt/verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCollectorCryptSyncRoute = ApiCollectorCryptSyncRouteImport.update({
+  id: '/api/collector-crypt/sync',
+  path: '/api/collector-crypt/sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppCollectionsSlugRoute = AppCollectionsSlugRouteImport.update({
   id: '/$slug',
   path: '/$slug',
@@ -358,6 +370,8 @@ export interface FileRoutesByFullPath {
   '/api/verified-listed': typeof ApiVerifiedListedRoute
   '/api/verified-sales': typeof ApiVerifiedSalesRouteWithChildren
   '/collections/$slug': typeof AppCollectionsSlugRoute
+  '/api/collector-crypt/sync': typeof ApiCollectorCryptSyncRoute
+  '/api/collector-crypt/verify': typeof ApiCollectorCryptVerifyRoute
   '/api/discover/new-mints': typeof ApiDiscoverNewMintsRoute
   '/api/gacha/admin': typeof ApiGachaAdminRoute
   '/api/gacha/confirm-payment': typeof ApiGachaConfirmPaymentRoute
@@ -413,6 +427,8 @@ export interface FileRoutesByTo {
   '/api/verified-listed': typeof ApiVerifiedListedRoute
   '/api/verified-sales': typeof ApiVerifiedSalesRouteWithChildren
   '/collections/$slug': typeof AppCollectionsSlugRoute
+  '/api/collector-crypt/sync': typeof ApiCollectorCryptSyncRoute
+  '/api/collector-crypt/verify': typeof ApiCollectorCryptVerifyRoute
   '/api/discover/new-mints': typeof ApiDiscoverNewMintsRoute
   '/api/gacha/admin': typeof ApiGachaAdminRoute
   '/api/gacha/confirm-payment': typeof ApiGachaConfirmPaymentRoute
@@ -470,6 +486,8 @@ export interface FileRoutesById {
   '/api/verified-listed': typeof ApiVerifiedListedRoute
   '/api/verified-sales': typeof ApiVerifiedSalesRouteWithChildren
   '/_app/collections/$slug': typeof AppCollectionsSlugRoute
+  '/api/collector-crypt/sync': typeof ApiCollectorCryptSyncRoute
+  '/api/collector-crypt/verify': typeof ApiCollectorCryptVerifyRoute
   '/api/discover/new-mints': typeof ApiDiscoverNewMintsRoute
   '/api/gacha/admin': typeof ApiGachaAdminRoute
   '/api/gacha/confirm-payment': typeof ApiGachaConfirmPaymentRoute
@@ -527,6 +545,8 @@ export interface FileRouteTypes {
     | '/api/verified-listed'
     | '/api/verified-sales'
     | '/collections/$slug'
+    | '/api/collector-crypt/sync'
+    | '/api/collector-crypt/verify'
     | '/api/discover/new-mints'
     | '/api/gacha/admin'
     | '/api/gacha/confirm-payment'
@@ -582,6 +602,8 @@ export interface FileRouteTypes {
     | '/api/verified-listed'
     | '/api/verified-sales'
     | '/collections/$slug'
+    | '/api/collector-crypt/sync'
+    | '/api/collector-crypt/verify'
     | '/api/discover/new-mints'
     | '/api/gacha/admin'
     | '/api/gacha/confirm-payment'
@@ -638,6 +660,8 @@ export interface FileRouteTypes {
     | '/api/verified-listed'
     | '/api/verified-sales'
     | '/_app/collections/$slug'
+    | '/api/collector-crypt/sync'
+    | '/api/collector-crypt/verify'
     | '/api/discover/new-mints'
     | '/api/gacha/admin'
     | '/api/gacha/confirm-payment'
@@ -686,6 +710,8 @@ export interface RootRouteChildren {
   ApiNftsRoute: typeof ApiNftsRouteWithChildren
   ApiVerifiedListedRoute: typeof ApiVerifiedListedRoute
   ApiVerifiedSalesRoute: typeof ApiVerifiedSalesRouteWithChildren
+  ApiCollectorCryptSyncRoute: typeof ApiCollectorCryptSyncRoute
+  ApiCollectorCryptVerifyRoute: typeof ApiCollectorCryptVerifyRoute
   ApiDiscoverNewMintsRoute: typeof ApiDiscoverNewMintsRoute
   ApiGachaAdminRoute: typeof ApiGachaAdminRoute
   ApiGachaConfirmPaymentRoute: typeof ApiGachaConfirmPaymentRoute
@@ -1020,6 +1046,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDiscoverNewMintsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/collector-crypt/verify': {
+      id: '/api/collector-crypt/verify'
+      path: '/api/collector-crypt/verify'
+      fullPath: '/api/collector-crypt/verify'
+      preLoaderRoute: typeof ApiCollectorCryptVerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/collector-crypt/sync': {
+      id: '/api/collector-crypt/sync'
+      path: '/api/collector-crypt/sync'
+      fullPath: '/api/collector-crypt/sync'
+      preLoaderRoute: typeof ApiCollectorCryptSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/collections/$slug': {
       id: '/_app/collections/$slug'
       path: '/$slug'
@@ -1214,6 +1254,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiNftsRoute: ApiNftsRouteWithChildren,
   ApiVerifiedListedRoute: ApiVerifiedListedRoute,
   ApiVerifiedSalesRoute: ApiVerifiedSalesRouteWithChildren,
+  ApiCollectorCryptSyncRoute: ApiCollectorCryptSyncRoute,
+  ApiCollectorCryptVerifyRoute: ApiCollectorCryptVerifyRoute,
   ApiDiscoverNewMintsRoute: ApiDiscoverNewMintsRoute,
   ApiGachaAdminRoute: ApiGachaAdminRoute,
   ApiGachaConfirmPaymentRoute: ApiGachaConfirmPaymentRoute,

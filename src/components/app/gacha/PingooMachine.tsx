@@ -15,14 +15,14 @@ const TREASURY_ADDRESS =
 const TREASURY_PUBLIC_KEY = new PublicKey(TREASURY_ADDRESS);
 
 const CATEGORIES = [
-  { id: "pokemon", name: "Pokémon", subtitle: "Monsters & trainers", icon: "⚡", accent: "#f5c542", soft: "rgba(245,197,66,.24)" },
-  { id: "onepiece", name: "One Piece", subtitle: "Pirates & legends", icon: "☠", accent: "#35a7ff", soft: "rgba(53,167,255,.24)" },
-  { id: "yugioh", name: "Yu-Gi-Oh!", subtitle: "Duel cards", icon: "✦", accent: "#bd5cff", soft: "rgba(189,92,255,.24)" },
-  { id: "sports", name: "Sports", subtitle: "Stars & rookies", icon: "🏆", accent: "#52e79c", soft: "rgba(82,231,156,.22)" },
-  { id: "magic", name: "Magic", subtitle: "Fantasy cards", icon: "🔥", accent: "#ff704f", soft: "rgba(255,112,79,.22)" },
-  { id: "lorcana", name: "Lorcana", subtitle: "Enchanted cards", icon: "🪄", accent: "#ff6fd8", soft: "rgba(255,111,216,.22)" },
-  { id: "dragonball", name: "Dragon Ball", subtitle: "Warriors & energy", icon: "🐉", accent: "#ff9d32", soft: "rgba(255,157,50,.22)" },
-  { id: "other", name: "Other", subtitle: "More collections", icon: "◆", accent: "#8d93ff", soft: "rgba(141,147,255,.22)" },
+  { id: "pokemon", name: "Pokémon", subtitle: "Monsters & trainers", icon: "⚡", img: "/IconPOKEMON.png", accent: "#f5c542", soft: "rgba(245,197,66,.24)" },
+  { id: "onepiece", name: "One Piece", subtitle: "Pirates & legends", icon: "☠", img: "/IconONEPIECE.png", accent: "#35a7ff", soft: "rgba(53,167,255,.24)" },
+  { id: "yugioh", name: "Yu-Gi-Oh!", subtitle: "Duel cards", icon: "✦", img: "/IconYUGIOH.png", accent: "#bd5cff", soft: "rgba(189,92,255,.24)" },
+  { id: "sports", name: "Sports", subtitle: "Stars & rookies", icon: "🏆", img: "/IconNBA.png", accent: "#52e79c", soft: "rgba(82,231,156,.22)" },
+  // { id: "magic", name: "Magic", subtitle: "Fantasy cards", icon: "🔥", accent: "#ff704f", soft: "rgba(255,112,79,.22)" },
+  // { id: "lorcana", name: "Lorcana", subtitle: "Enchanted cards", icon: "🪄", accent: "#ff6fd8", soft: "rgba(255,111,216,.22)" },
+  // { id: "dragonball", name: "Dragon Ball", subtitle: "Warriors & energy", icon: "🐉", accent: "#ff9d32", soft: "rgba(255,157,50,.22)" },
+  // { id: "other", name: "Other", subtitle: "More collections", icon: "◆", accent: "#8d93ff", soft: "rgba(141,147,255,.22)" },
 ];
 
 /** Legacy key — migrated to ACTIVE on first load. */
@@ -244,15 +244,26 @@ function useLiveBalance(publicKey: PublicKey | null) {
   return { balance, refresh };
 }
 
-function WalletStatus({ balance, walletConnectionError, clearWalletConnectionError, onOpenWalletModal, onDisconnect }: {
-  balance: number | null;
+function WalletTopBarButton({ walletConnectionError, clearWalletConnectionError, onOpenWalletModal, onDisconnect }: {
   walletConnectionError: string;
   clearWalletConnectionError: () => void;
   onOpenWalletModal: () => void;
   onDisconnect: () => void;
 }) {
-  const { connected, publicKey, connecting } = useWallet();
+  const { connected, connecting } = useWallet();
   useEffect(() => { if (connected) clearWalletConnectionError(); }, [connected, clearWalletConnectionError]);
+  return (
+    <div className="topbar-wallet">
+      <button type="button" className="wallet-button-custom" onClick={connected ? onDisconnect : onOpenWalletModal} disabled={connecting}>
+        {connecting ? "Connexion…" : connected ? "Déconnecter" : "Connect Wallet"}
+      </button>
+      {walletConnectionError && <small className="wallet-inline-error">{walletConnectionError}</small>}
+    </div>
+  );
+}
+
+function WalletStatus({ balance }: { balance: number | null }) {
+  const { connected, publicKey } = useWallet();
   return (
     <div className="wallet-area">
       {connected && publicKey && (
@@ -261,12 +272,6 @@ function WalletStatus({ balance, walletConnectionError, clearWalletConnectionErr
           <small>{balance === null ? "Chargement…" : `${balance.toFixed(3)} SOL · Devnet`}</small>
         </div>
       )}
-      <div className="wallet-connect-stack">
-        <button type="button" className="wallet-button-custom" onClick={connected ? onDisconnect : onOpenWalletModal} disabled={connecting}>
-          {connecting ? "Connexion…" : connected ? "Déconnecter" : "Connect Wallet"}
-        </button>
-        {walletConnectionError && <small className="wallet-inline-error">{walletConnectionError}</small>}
-      </div>
     </div>
   );
 }
@@ -337,8 +342,7 @@ function BoosterFace({ category, pack, compact = false }: { category: typeof CAT
     <>
       <span className="pack-shine" />
       <span className="pack-tier">{pack.badge}</span>
-      <span className="pack-icon">{category.icon}</span>
-      <strong>{formatSol(pack.price)}</strong>
+      <span className="pack-icon">{category.img ? <img src={category.img} alt={category.name} /> : category.icon}</span>
       {!compact && <small>{category.name}</small>}
     </>
   );
@@ -693,6 +697,20 @@ export function PingooMachine({ walletConnectionError = "", clearWalletConnectio
         <AccessChoiceModal pack={pack} onDemo={startDemoMachine} onWallet={() => { setAccessChoiceOpen(false); setWalletModalOpen(true); }} onClose={() => setAccessChoiceOpen(false)} />
       )}
 
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark">P</div>
+          <div><strong>PINGOO</strong><span>Tokenized Collectibles</span></div>
+        </div>
+        <div />
+        <WalletTopBarButton
+          walletConnectionError={walletConnectionError}
+          clearWalletConnectionError={clearWalletConnectionError}
+          onOpenWalletModal={() => { clearWalletConnectionError(); setWalletModalOpen(true); }}
+          onDisconnect={handleDisconnect}
+        />
+      </header>
+
       <main className="layout">
         <aside className="category-panel arcade-cabinet">
           <div className="panel-heading">
@@ -703,7 +721,7 @@ export function PingooMachine({ walletConnectionError = "", clearWalletConnectio
             {CATEGORIES.map((item, index) => (
               <button type="button" key={item.id} className={`category-card ${index === categoryIndex ? "selected" : ""}`} onClick={() => selectCategory(index)} disabled={isBusy}>
                 <span className="category-led" />
-                <span className="category-icon">{item.icon}</span>
+                <span className="category-icon">{item.img ? <img src={item.img} alt={item.name} /> : item.icon}</span>
                 <span className="category-copy"><strong>{item.name}</strong><small>{item.subtitle}</small></span>
                 <span className="arcade-arrow">▶</span>
               </button>
@@ -727,14 +745,17 @@ export function PingooMachine({ walletConnectionError = "", clearWalletConnectio
               {CATEGORIES.map((shelfCategory, shelfIndex) => (
                 <div key={shelfCategory.id} ref={(node) => { shelfRefs.current[shelfIndex] = node; }} className={`shelf-row ${shelfIndex === categoryIndex ? "active" : ""}`} style={{ "--row-accent": shelfCategory.accent, "--row-soft": shelfCategory.soft } as React.CSSProperties}>
                   <div className="shelf-label">
-                    <span>{shelfCategory.icon}</span>
+                    {shelfCategory.img ? <img src={shelfCategory.img} alt={shelfCategory.name} className="shelf-label-icon" /> : <span>{shelfCategory.icon}</span>}
                     <div><strong>{shelfCategory.name}</strong><small>{shelfIndex === categoryIndex ? "Rayon actif" : "Autre rayon"}</small></div>
                   </div>
                   <div className="packs-row">
                     {packConfigs.map((packItem, index) => (
-                      <button type="button" key={packItem.id} ref={(node) => { packRefs.current[`${shelfCategory.id}-${packItem.id}`] = node; }} className={`pack tier-${index + 1} ${shelfIndex === categoryIndex && index === packIndex ? "selected" : ""}`} style={{ "--pack-gradient": packItem.gradient } as React.CSSProperties} disabled={shelfIndex !== categoryIndex || isBusy} onClick={() => selectPack(index)} aria-label={`${shelfCategory.name}, booster ${formatSol(packItem.price)}`}>
-                        <BoosterFace category={shelfCategory} pack={packItem} compact />
-                      </button>
+                      <div key={packItem.id} className="pack-slot">
+                        <button type="button" ref={(node) => { packRefs.current[`${shelfCategory.id}-${packItem.id}`] = node; }} className={`pack tier-${index + 1} ${shelfIndex === categoryIndex && index === packIndex ? "selected" : ""}`} style={{ "--pack-gradient": packItem.gradient } as React.CSSProperties} disabled={shelfIndex !== categoryIndex || isBusy} onClick={() => selectPack(index)} aria-label={`${shelfCategory.name}, booster ${formatSol(packItem.price)}`}>
+                          <BoosterFace category={shelfCategory} pack={packItem} compact />
+                        </button>
+                        <div className="pack-price-tag">{formatSol(packItem.price)}</div>
+                      </div>
                     ))}
                   </div>
                   <div className="shelf-rail" />
@@ -778,7 +799,7 @@ export function PingooMachine({ walletConnectionError = "", clearWalletConnectio
               </div>
               {walletAddress && <button type="button" className="copy-wallet-button" onClick={copyWalletAddress}>{walletCopied ? "Copié" : "Copier"}</button>}
             </div>
-            <WalletStatus balance={walletBalance} walletConnectionError={walletConnectionError} clearWalletConnectionError={clearWalletConnectionError} onOpenWalletModal={() => { clearWalletConnectionError(); setWalletModalOpen(true); }} onDisconnect={handleDisconnect} />
+            <WalletStatus balance={walletBalance} />
             <div className="player-stat-grid">
               <div className="player-stat balance"><span>Solde actuel</span><strong>{walletBalance === null ? "—" : `${walletBalance.toFixed(4)} SOL`}</strong><small>Solana Devnet</small></div>
               <div className={`player-stat pnl ${pnlTone}`}><span>P&amp;L session</span><strong>{formatSignedSol(sessionStats.pnl)}</strong><small>Valeur de jeu simulée</small></div>

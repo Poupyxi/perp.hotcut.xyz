@@ -1,37 +1,48 @@
-import { DatabaseSync } from "node:sqlite";
 import { getNftDb, stringifyJson } from "./nftSqliteDb";
-import { v4 as uuidv4 } from "crypto";
+import { randomUUID } from "node:crypto";
 
 export interface CollectorCryptListing {
+  provider?: string;
+  listingId: string;
   mint: string;
-  listingId?: string;
   marketplace?: string;
   price?: number;
   currency?: string;
   seller?: string;
   listedAt?: string;
+  updatedAt?: string;
   rawPayload?: unknown;
 }
 
 export interface SnapshotComparisonResult {
   disappeared: Array<{
+    provider: string;
+    listingId: string;
     mint: string;
     previousListing: CollectorCryptListing;
   }>;
   newListings: CollectorCryptListing[];
-  stillListed: string[];
+  relistings: string[];
 }
 
 export interface SyncResult {
   snapshotId: string;
-  listingsFound: number;
+  status: "building" | "complete" | "partial" | "failed";
+  listingsAnnounced: number;
   listingsStored: number;
+  pagesFetched: number;
   disappearedCount: number;
-  disappearedMints: string[];
+  disappearedListingIds: string[];
   error?: string;
+  validationErrors?: string[];
 }
 
-async function fetchCollectorCryptListings(): Promise<CollectorCryptListing[]> {
+async function fetchCollectorCryptListingsPage(page: number, limit: number): Promise<{
+  listings: CollectorCryptListing[];
+  total: number;
+  totalPages: number;
+  hasMore: boolean;
+}> {
   const apiUrl = process.env.COLLECTOR_CRYPT_API_URL;
   if (!apiUrl) {
     throw new Error("COLLECTOR_CRYPT_API_URL not configured");
@@ -39,49 +50,76 @@ async function fetchCollectorCryptListings(): Promise<CollectorCryptListing[]> {
 
   const listingsPath = process.env.COLLECTOR_CRYPT_LISTINGS_PATH || "/listings";
   const url = new URL(listingsPath, apiUrl);
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("limit", String(limit));
 
-  try {
-    const response = await fetch(url.toString(), {
-      headers: { accept: "application/json" },
-    });
+  const response = await fetch(url.toString(), {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(30_000),
+  });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return normalizeCollectorCryptPayload(data);
-  } catch (error) {
-    throw new Error(`Failed to fetch Collector Crypt listings: ${error instanceof Error ? error.message : "unknown error"}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }
+
+  const data = await response.json() as unknown;
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid API response structure");
+  }
+
+  const obj = data as Record<string, unknown>;
+
+  // Extract listings array
+  let items: unknown[] = [];
+  if (Array.isArray(obj.listings)) {
+    items = obj.listings;
+  } else if (Array.isArray(obj.data)) {
+    items = obj.data;
+  } else if (Array.isArray(obj.items)) {
+    items = obj.items;
+  }
+
+  // Extract pagination info
+  const total = typeof obj.total === "number" ? obj.total : 0;
+  const totalPages = typeof obj.total_pages === "number" ? obj.total_pages : typeof obj.totalPages === "number" ? obj.totalPages : Math.ceil(total / limit);
+
+  const listings = normalizeListings(items);
+  const hasMore = page < totalPages;
+
+  return {
+    listings,
+    total,
+    totalPages,
+    hasMore,
+  };
 }
 
-function normalizeCollectorCryptPayload(payload: unknown): CollectorCryptListing[] {
-  if (!payload || typeof payload !== "object") return [];
-
+function normalizeListings(items: unknown[]): CollectorCryptListing[] {
   const listings: CollectorCryptListing[] = [];
-
-  // Handle both array and object with 'listings' property
-  const items = Array.isArray(payload) ? payload : (payload as Record<string, unknown>).listings;
-  if (!Array.isArray(items)) return [];
 
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
 
     const obj = item as Record<string, unknown>;
+
+    // Extract required fields
+    const listingId = String(obj.listing_id || obj.id || obj.listingId || "").trim();
+    const mint = String(obj.mint || obj.assetMint || obj.nft_mint || "").trim();
+
+    if (!listingId || !mint) continue;
+
     const listing: CollectorCryptListing = {
-      mint: String(obj.mint || obj.assetMint || obj.nft_mint || ""),
+      provider: "collector-crypt",
+      listingId,
+      mint,
+      marketplace: String(obj.marketplace || obj.market || "").trim() || undefined,
+      price: typeof obj.price === "number" ? obj.price : typeof obj.price === "string" ? parseFloat(obj.price) : undefined,
+      currency: String(obj.currency || obj.symbol || "").trim() || undefined,
+      seller: String(obj.seller || obj.sellerWallet || obj.sellerAddress || "").trim() || undefined,
+      listedAt: String(obj.listedAt || obj.listed_at || obj.createdAt || obj.created_at || "").trim() || undefined,
+      updatedAt: String(obj.updatedAt || obj.updated_at || "").trim() || undefined,
+      rawPayload: obj,
     };
-
-    if (!listing.mint) continue;
-
-    listing.listingId = String(obj.listingId || obj.id || "");
-    listing.marketplace = String(obj.marketplace || obj.market || "");
-    listing.price = typeof obj.price === "number" ? obj.price : typeof obj.price === "string" ? parseFloat(obj.price) : undefined;
-    listing.currency = String(obj.currency || obj.symbol || "");
-    listing.seller = String(obj.seller || obj.sellerWallet || obj.sellerAddress || "");
-    listing.listedAt = String(obj.listedAt || obj.createdAt || obj.timestamp || "");
-    listing.rawPayload = obj;
 
     listings.push(listing);
   }
@@ -89,97 +127,51 @@ function normalizeCollectorCryptPayload(payload: unknown): CollectorCryptListing
   return listings;
 }
 
-function getLatestSnapshots(db: DatabaseSync): { current: string | null; previous: string | null } {
-  const rows = db
-    .prepare("SELECT id FROM collector_crypt_snapshots ORDER BY snapshot_at DESC LIMIT 2")
-    .all() as Array<{ id: string }>;
-
-  return {
-    current: rows[0]?.id || null,
-    previous: rows[1]?.id || null,
-  };
+function getPreviousCompleteSnapshot(db: any): { id: string; createdAt: string } | null {
+  const row = db
+    .prepare("SELECT id, created_at FROM collector_crypt_snapshots WHERE status='complete' ORDER BY created_at DESC LIMIT 1")
+    .get() as { id: string; created_at: string } | undefined;
+  return row || null;
 }
 
-function getPreviousListings(db: DatabaseSync, snapshotId: string | null): Map<string, CollectorCryptListing> {
-  if (!snapshotId) return new Map();
-
+function getPreviousListingsByIdentity(db: any, snapshotId: string): Map<string, CollectorCryptListing> {
   const rows = db
     .prepare(
-      `SELECT mint, listing_id, marketplace, listing_price, listing_currency, seller, listed_at, raw_payload_json
+      `SELECT provider, listing_id, mint, marketplace, listing_price, listing_currency, seller, listed_at, updated_at, raw_payload_json
        FROM collector_crypt_listings
        WHERE snapshot_id = ? AND is_current_snapshot = 1`,
     )
     .all(snapshotId) as Array<{
+    provider: string;
+    listing_id: string;
     mint: string;
-    listing_id?: string;
     marketplace?: string;
     listing_price?: number;
     listing_currency?: string;
     seller?: string;
     listed_at?: string;
+    updated_at?: string;
     raw_payload_json?: string;
   }>;
 
   const map = new Map<string, CollectorCryptListing>();
   for (const row of rows) {
-    map.set(row.mint, {
-      mint: row.mint,
+    const key = `${row.provider}:${row.listing_id}`;
+    map.set(key, {
+      provider: row.provider,
       listingId: row.listing_id,
+      mint: row.mint,
       marketplace: row.marketplace,
       price: row.listing_price,
       currency: row.listing_currency,
       seller: row.seller,
       listedAt: row.listed_at,
+      updatedAt: row.updated_at,
       rawPayload: row.raw_payload_json ? JSON.parse(row.raw_payload_json) : undefined,
     });
   }
 
   return map;
-}
-
-function archiveOldSnapshot(db: DatabaseSync, snapshotId: string): void {
-  db.prepare("UPDATE collector_crypt_listings SET is_current_snapshot = 0 WHERE snapshot_id = ?").run(snapshotId);
-}
-
-function storeListing(
-  db: DatabaseSync,
-  mint: string,
-  listing: CollectorCryptListing,
-  snapshotId: string,
-): void {
-  const id = `cc-${snapshotId}-${mint}`;
-  const now = new Date().toISOString();
-
-  const existing = db
-    .prepare("SELECT id FROM collector_crypt_listings WHERE mint = ? AND snapshot_id = ?")
-    .get(mint, snapshotId);
-
-  if (existing) {
-    // Already in this snapshot, just update if needed
-    return;
-  }
-
-  db.prepare(
-    `INSERT INTO collector_crypt_listings (
-      id, mint, marketplace, listing_id, listing_price, listing_currency, seller, listed_at,
-      snapshot_id, listing_status, is_current_snapshot, raw_payload_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    mint,
-    listing.marketplace || null,
-    listing.listingId || null,
-    listing.price || null,
-    listing.currency || null,
-    listing.seller || null,
-    listing.listedAt || null,
-    snapshotId,
-    "active",
-    1,
-    listing.rawPayload ? stringifyJson(listing.rawPayload) : null,
-    now,
-    now,
-  );
 }
 
 export function compareSnapshots(input: {
@@ -191,153 +183,267 @@ export function compareSnapshots(input: {
   const currentListings = new Map<string, CollectorCryptListing>();
   const currentRows = db
     .prepare(
-      `SELECT mint, listing_id, marketplace, listing_price, listing_currency, seller, listed_at, raw_payload_json
+      `SELECT provider, listing_id, mint, marketplace, listing_price, listing_currency, seller, listed_at, updated_at, raw_payload_json
        FROM collector_crypt_listings
        WHERE snapshot_id = ? AND is_current_snapshot = 1`,
     )
     .all(input.currentSnapshotId) as Array<{
+    provider: string;
+    listing_id: string;
     mint: string;
-    listing_id?: string;
     marketplace?: string;
     listing_price?: number;
     listing_currency?: string;
     seller?: string;
     listed_at?: string;
+    updated_at?: string;
     raw_payload_json?: string;
   }>;
 
   for (const row of currentRows) {
-    currentListings.set(row.mint, {
-      mint: row.mint,
+    const key = `${row.provider}:${row.listing_id}`;
+    currentListings.set(key, {
+      provider: row.provider,
       listingId: row.listing_id,
+      mint: row.mint,
       marketplace: row.marketplace,
       price: row.listing_price,
       currency: row.listing_currency,
       seller: row.seller,
       listedAt: row.listed_at,
+      updatedAt: row.updated_at,
       rawPayload: row.raw_payload_json ? JSON.parse(row.raw_payload_json) : undefined,
     });
   }
 
-  const previousListings = getPreviousListings(db, input.previousSnapshotId);
+  const previousListings = input.previousSnapshotId ? getPreviousListingsByIdentity(db, input.previousSnapshotId) : new Map();
 
-  const disappeared: Array<{ mint: string; previousListing: CollectorCryptListing }> = [];
-  const stillListed: string[] = [];
+  const disappeared: Array<{ provider: string; listingId: string; mint: string; previousListing: CollectorCryptListing }> = [];
+  const relistings: string[] = [];
 
   // Check which previous listings have disappeared
-  for (const [mint, prevListing] of previousListings) {
-    if (!currentListings.has(mint)) {
-      disappeared.push({ mint, previousListing: prevListing });
+  for (const [key, prevListing] of previousListings) {
+    if (!currentListings.has(key)) {
+      disappeared.push({
+        provider: prevListing.provider || "collector-crypt",
+        listingId: prevListing.listingId,
+        mint: prevListing.mint,
+        previousListing: prevListing,
+      });
     } else {
-      stillListed.push(mint);
+      relistings.push(key);
     }
   }
 
   // New listings are those not in previous snapshot
   const newListings: CollectorCryptListing[] = [];
-  for (const [mint, currentListing] of currentListings) {
-    if (!previousListings.has(mint)) {
+  for (const [key, currentListing] of currentListings) {
+    if (!previousListings.has(key)) {
       newListings.push(currentListing);
     }
-  }
-
-  // Archive old snapshot
-  if (input.previousSnapshotId) {
-    archiveOldSnapshot(db, input.previousSnapshotId);
   }
 
   return {
     disappeared,
     newListings,
-    stillListed,
+    relistings,
   };
 }
 
 export async function syncCollectorCryptSnapshot(): Promise<SyncResult> {
   const db = getNftDb();
-  const snapshotId = uuidv4();
+  const snapshotId = randomUUID();
   const now = new Date().toISOString();
+  const pageLimit = 100;
+  const validationErrors: string[] = [];
+  let status: "building" | "complete" | "partial" | "failed" = "building";
+  let totalAnnounced = 0;
+  let pagesFetched = 0;
+  let totalStored = 0;
 
   try {
-    // Fetch current listings from API
-    const listings = await fetchCollectorCryptListings();
-
-    // Create snapshot record
+    // Create snapshot with building status
     db.prepare(
-      `INSERT INTO collector_crypt_snapshots (id, snapshot_at, total_listings_found, listings_stored, is_complete, created_at)
+      `INSERT INTO collector_crypt_snapshots (id, snapshot_at, status, page_limit, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(snapshotId, now, listings.length, 0, 1, now);
+    ).run(snapshotId, now, "building", pageLimit, now, now);
 
-    // Store listings in transaction
-    const transaction = db.transaction((listingsToStore: CollectorCryptListing[]) => {
-      for (const listing of listingsToStore) {
-        storeListing(db, listing.mint, listing, snapshotId);
-      }
-    });
+    // Fetch all pages with pagination
+    let page = 1;
+    let hasMore = true;
 
-    transaction(listings);
+    while (hasMore) {
+      try {
+        const pageData = await fetchCollectorCryptListingsPage(page, pageLimit);
+        totalAnnounced = pageData.total;
+        pagesFetched = page;
 
-    // Update snapshot with stored count
-    const storedCount = db
-      .prepare("SELECT COUNT(*) as count FROM collector_crypt_listings WHERE snapshot_id = ?")
-      .get(snapshotId) as { count: number };
-    db.prepare("UPDATE collector_crypt_snapshots SET listings_stored = ? WHERE id = ?").run(storedCount.count, snapshotId);
+        // Store listings in transaction
+        const transaction = db.transaction((listings: CollectorCryptListing[], snapId: string) => {
+          for (const listing of listings) {
+            const listingId = `${snapId}:${listing.provider}:${listing.listingId}`;
+            const insertedAt = new Date().toISOString();
 
-    // Compare with previous snapshot to detect disappeared listings
-    const { current, previous } = getLatestSnapshots(db);
-    const disappearedMints: string[] = [];
+            db.prepare(
+              `INSERT INTO collector_crypt_listings (
+                id, provider, listing_id, mint, marketplace, listing_price, listing_currency, seller, listed_at, updated_at,
+                snapshot_id, listing_status, is_current_snapshot, raw_payload_json, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              listingId,
+              listing.provider || "collector-crypt",
+              listing.listingId,
+              listing.mint,
+              listing.marketplace || null,
+              listing.price || null,
+              listing.currency || null,
+              listing.seller || null,
+              listing.listedAt || null,
+              listing.updatedAt || null,
+              snapId,
+              "active",
+              1,
+              listing.rawPayload ? stringifyJson(listing.rawPayload) : null,
+              insertedAt,
+            );
+          }
+        });
 
-    if (previous && current === snapshotId) {
-      const comparison = compareSnapshots({
-        currentSnapshotId: current,
-        previousSnapshotId: previous,
-      });
+        transaction(pageData.listings, snapshotId);
+        totalStored += pageData.listings.length;
 
-      disappearedMints.push(...comparison.disappeared.map((d) => d.mint));
-
-      // Queue disappeared listings for verification
-      const queueTransaction = db.transaction((disappeared: Array<{ mint: string; previousListing: CollectorCryptListing }>) => {
-        for (const { mint, previousListing } of disappeared) {
-          const queueId = `cc-verify-${mint}-${snapshotId}`;
-          const queueNow = new Date().toISOString();
-
-          db.prepare(
-            `INSERT OR IGNORE INTO collector_crypt_verification_queue (
-              id, mint, reason, previous_listing_price, previous_listing_at, previous_owner,
-              status, attempt_count, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(
-            queueId,
-            mint,
-            "disappeared_from_listing",
-            previousListing.price || null,
-            previousListing.listedAt || null,
-            previousListing.seller || null,
-            "pending",
-            0,
-            queueNow,
-            queueNow,
-          );
+        hasMore = pageData.hasMore;
+        page++;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "unknown error";
+        validationErrors.push(`Page ${page} failed: ${errorMsg}`);
+        if (page === 1) {
+          status = "failed";
+          break;
         }
-      });
+      }
+    }
 
-      queueTransaction(comparison.disappeared);
+    // Validate snapshot completeness
+    if (status !== "failed") {
+      const storedCount = db
+        .prepare("SELECT COUNT(*) as count FROM collector_crypt_listings WHERE snapshot_id = ?")
+        .get(snapshotId) as { count: number };
+      totalStored = storedCount.count;
+
+      // Check if counts match
+      if (totalAnnounced > 0 && Math.abs(storedCount.count - totalAnnounced) > Math.max(totalAnnounced * 0.02, 1)) {
+        validationErrors.push(`Fetched ${totalStored} but API announced ${totalAnnounced}`);
+        status = "partial";
+      } else {
+        status = "complete";
+      }
+    }
+
+    // Update snapshot status
+    db.prepare(
+      `UPDATE collector_crypt_snapshots SET
+        status = ?, pages_fetched = ?, total_listings_announced = ?, listings_stored = ?,
+        validation_errors = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      status,
+      pagesFetched,
+      totalAnnounced,
+      totalStored,
+      validationErrors.length > 0 ? stringifyJson(validationErrors) : null,
+      now,
+      snapshotId,
+    );
+
+    // Only compare if status is complete
+    let disappearedListingIds: string[] = [];
+    if (status === "complete") {
+      const previousSnapshot = getPreviousCompleteSnapshot(db);
+
+      if (previousSnapshot) {
+        const comparison = compareSnapshots({
+          currentSnapshotId: snapshotId,
+          previousSnapshotId: previousSnapshot.id,
+        });
+
+        disappearedListingIds = comparison.disappeared.map((d) => d.listingId);
+
+        // Queue disappeared listings for verification in atomic transaction
+        const queueTransaction = db.transaction((disappearedItems: typeof comparison.disappeared) => {
+          for (const { provider, listingId, mint, previousListing } of disappearedItems) {
+            const queueId = `${provider}:${listingId}:${snapshotId}`;
+            const queueNow = new Date().toISOString();
+
+            // Check if already queued (avoid duplicates)
+            const existing = db
+              .prepare("SELECT id FROM collector_crypt_verification_queue WHERE provider=? AND listing_id=? AND status IN ('pending','in_progress')")
+              .get(provider, listingId);
+
+            if (!existing) {
+              db.prepare(
+                `INSERT INTO collector_crypt_verification_queue (
+                  id, provider, listing_id, mint, reason, previous_listing_price, previous_listing_at, previous_owner,
+                  status, attempt_count, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              ).run(
+                queueId,
+                provider,
+                listingId,
+                mint,
+                "disappeared_from_listing",
+                previousListing.price || null,
+                previousListing.listedAt || null,
+                previousListing.seller || null,
+                "pending",
+                0,
+                queueNow,
+                queueNow,
+              );
+            }
+          }
+
+          // Archive previous complete snapshot if new one is valid
+          if (previousSnapshot) {
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+            db.prepare("UPDATE collector_crypt_snapshots SET status='archived' WHERE id=? AND created_at < ?").run(
+              previousSnapshot.id,
+              sevenDaysAgo,
+            );
+          }
+        });
+
+        queueTransaction(comparison.disappeared);
+      }
     }
 
     return {
       snapshotId,
-      listingsFound: listings.length,
-      listingsStored: storedCount.count,
-      disappearedCount: disappearedMints.length,
-      disappearedMints,
+      status,
+      listingsAnnounced: totalAnnounced,
+      listingsStored: totalStored,
+      pagesFetched,
+      disappearedCount: disappearedListingIds.length,
+      disappearedListingIds,
+      validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
     };
   } catch (error) {
-    // Mark snapshot as incomplete
-    db.prepare("UPDATE collector_crypt_snapshots SET is_complete = 0, error_message = ? WHERE id = ?").run(
-      error instanceof Error ? error.message : "unknown error",
-      snapshotId,
-    );
+    const errorMsg = error instanceof Error ? error.message : "unknown error";
 
-    throw error;
+    // Mark snapshot as failed
+    db.prepare(
+      `UPDATE collector_crypt_snapshots SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+    ).run(errorMsg, now, snapshotId);
+
+    return {
+      snapshotId,
+      status: "failed",
+      listingsAnnounced: totalAnnounced,
+      listingsStored: totalStored,
+      pagesFetched,
+      disappearedCount: 0,
+      disappearedListingIds: [],
+      error: errorMsg,
+    };
   }
 }

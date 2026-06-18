@@ -4,6 +4,9 @@ import type {
   ProviderMarketActivityConnector,
   RwaNftMarketEvent,
 } from "@/types/rwaNftMarket";
+import { getSolscanProbe, probeSolscan } from "./solscanNftActivityService";
+
+const solscanProbeCacheRef = getSolscanProbe;
 
 type RuntimeEnv = Record<string, string | undefined>;
 
@@ -91,9 +94,30 @@ class SolscanMarketActivityConnector extends BaseConnector {
   providerId = "solscan";
 
   getStatus() {
-    return env().SOLSCAN_API_KEY
-      ? status(this.providerId, "prepared", "Solscan API key is configured; fallback transaction lookups can be mapped later.")
-      : status(this.providerId, "needs_api_key", "Solscan requires SOLSCAN_API_KEY for reliable API usage.");
+    if ((env().SOLSCAN_ENABLED ?? "true").toLowerCase() === "false") {
+      return status(this.providerId, "disabled", "Solscan disabled via SOLSCAN_ENABLED=false.");
+    }
+    if (!env().SOLSCAN_API_KEY) {
+      return status(this.providerId, "needs_api_key", "Solscan requires SOLSCAN_API_KEY for reliable API usage.");
+    }
+    const probe = solscanProbeCacheRef();
+    if (!probe) {
+      return status(this.providerId, "prepared", "Solscan API key configured. Live probe pending — call /api/providers/status again in a moment.");
+    }
+    if (probe.ok) {
+      return status(this.providerId, "live", "Solscan Pro endpoints reachable. Activity + transaction-detail enrichment active.");
+    }
+    if (probe.httpStatus === 401 || probe.httpStatus === 403) {
+      return status(
+        this.providerId,
+        "error",
+        `Solscan rejected the API key (${probe.message}). Upgrade your Solscan Pro plan to access /account/transactions and /nft/activities — further calls are short-circuited.`,
+      );
+    }
+    if (probe.httpStatus === 429) {
+      return status(this.providerId, "unavailable", `Solscan rate-limited: ${probe.message}.`);
+    }
+    return status(this.providerId, "error", `Solscan probe failed: ${probe.message}`);
   }
 }
 

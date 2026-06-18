@@ -1,0 +1,16 @@
+{
+  "name": "Gacha Test Card (devnet)",
+  "symbol": "GCHA",
+  "description": "Test NFT minted by the Perp RWA Gacha MVP on Solana devnet. Has no real-world value.",
+  "image": "https://perp.hotcut.xyz/iconpokemon.png",
+  "attributes": [
+    { "trait_type": "Network", "value": "devnet" },
+    { "trait_type": "Source", "value": "perp-rwa-gacha" }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      { "uri": "https://perp.hotcut.xyz/iconpokemon.png", "type": "image/png" }
+    ]
+  }
+}

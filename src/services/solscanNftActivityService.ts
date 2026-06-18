@@ -22,6 +22,114 @@ function env(): RuntimeEnv {
   return (globalThis as unknown as { process?: { env?: RuntimeEnv } }).process?.env ?? {};
 }
 
+export type SolscanProbeResult = {
+  ok: boolean;
+  disabled: boolean;
+  httpStatus: number;
+  message: string;
+  checkedAt: number;
+};
+
+const PROBE_TTL_MS = 30 * 60_000;
+const PROBE_RETRY_AFTER_AUTH_ERROR_MS = 10 * 60_000;
+let probeCache: SolscanProbeResult | null = null;
+let probeInFlight: Promise<SolscanProbeResult> | null = null;
+
+export function getSolscanProbe(): SolscanProbeResult | null {
+  return probeCache;
+}
+
+export function isSolscanDisabled(): boolean {
+  if ((env().SOLSCAN_ENABLED ?? "true").toLowerCase() === "false") return true;
+  if (!env().SOLSCAN_API_KEY) return true;
+  if (probeCache && probeCache.disabled) {
+    const auth = probeCache.httpStatus === 401 || probeCache.httpStatus === 403;
+    const ttl = auth ? PROBE_RETRY_AFTER_AUTH_ERROR_MS : PROBE_TTL_MS;
+    if (Date.now() - probeCache.checkedAt < ttl) return true;
+  }
+  return false;
+}
+
+export async function probeSolscan(force = false): Promise<SolscanProbeResult> {
+  const now = Date.now();
+  if (!force && probeCache && now - probeCache.checkedAt < PROBE_TTL_MS) {
+    return probeCache;
+  }
+  if (probeInFlight) return probeInFlight;
+
+  probeInFlight = (async () => {
+    try {
+      if ((env().SOLSCAN_ENABLED ?? "true").toLowerCase() === "false") {
+        return (probeCache = {
+          ok: false,
+          disabled: true,
+          httpStatus: 0,
+          message: "Disabled via SOLSCAN_ENABLED=false",
+          checkedAt: Date.now(),
+        });
+      }
+      const key = env().SOLSCAN_API_KEY?.trim();
+      if (!key) {
+        return (probeCache = {
+          ok: false,
+          disabled: true,
+          httpStatus: 0,
+          message: "SOLSCAN_API_KEY missing",
+          checkedAt: Date.now(),
+        });
+      }
+      const url = (env().SOLSCAN_API_URL || DEFAULT_SOLSCAN_API_URL).replace(/\/+$/, "");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      let httpStatus = 0;
+      let message = "";
+      try {
+        const res = await fetch(
+          `${url}/account/transactions?address=So11111111111111111111111111111111111111112&limit=1`,
+          { headers: { token: key, Authorization: `Bearer ${key}` }, signal: controller.signal },
+        );
+        httpStatus = res.status;
+        if (res.ok) {
+          return (probeCache = {
+            ok: true,
+            disabled: false,
+            httpStatus,
+            message: "Solscan Pro endpoints reachable",
+            checkedAt: Date.now(),
+          });
+        }
+        try {
+          const body = (await res.json()) as { errors?: { message?: string } };
+          message = body.errors?.message ? `${httpStatus}: ${body.errors.message}` : `Solscan ${httpStatus}`;
+        } catch {
+          message = `Solscan ${httpStatus}`;
+        }
+      } catch (err) {
+        message = err instanceof Error ? err.message : "Solscan probe failed";
+      } finally {
+        clearTimeout(timer);
+      }
+      const auth = httpStatus === 401 || httpStatus === 403;
+      const result: SolscanProbeResult = {
+        ok: false,
+        disabled: auth,
+        httpStatus,
+        message,
+        checkedAt: Date.now(),
+      };
+      probeCache = result;
+      if (auth) {
+        console.warn(`[SOLSCAN] Disabling further calls — ${message}`);
+      }
+      return result;
+    } finally {
+      probeInFlight = null;
+    }
+  })();
+
+  return probeInFlight;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -180,6 +288,22 @@ async function fetchJson(path: string, mint: string) {
       signal: controller.signal,
     });
     if (response.status === 429) return { status: "rate_limited" as const, payload: null, endpoint: path, error: "Solscan 429" };
+    if (response.status === 401 || response.status === 403) {
+      let detail = `${response.status}`;
+      try {
+        const body = await response.clone().json() as { errors?: { message?: string } };
+        if (body.errors?.message) detail = `${response.status}: ${body.errors.message}`;
+      } catch { /* ignore */ }
+      probeCache = {
+        ok: false,
+        disabled: true,
+        httpStatus: response.status,
+        message: detail,
+        checkedAt: Date.now(),
+      };
+      console.warn(`[SOLSCAN] Disabling further calls — ${detail}`);
+      return { status: "error" as const, payload: null, endpoint: path, error: `Solscan ${detail}` };
+    }
     if (!response.ok) return { status: "error" as const, payload: null, endpoint: path, error: `Solscan ${response.status}` };
     return { status: "ok" as const, payload: await response.json() as unknown, endpoint: path, error: null };
   } catch (error) {
@@ -191,6 +315,36 @@ async function fetchJson(path: string, mint: string) {
 }
 
 export async function fetchSolscanNftActivity(mint: string, primaryProvider = "solscan"): Promise<NftActivityProviderResult> {
+  if (isSolscanDisabled()) {
+    const probe = getSolscanProbe();
+    return {
+      provider: "solscan",
+      status: "unavailable",
+      activities: [],
+      fallbackUsed: false,
+      dbCacheUsed: false,
+      error: probe?.message ?? "Solscan disabled",
+      endpointsUsed: [],
+      fieldProviders: {},
+    };
+  }
+
+  if (!getSolscanProbe()) {
+    const probe = await probeSolscan();
+    if (probe.disabled) {
+      return {
+        provider: "solscan",
+        status: "unavailable",
+        activities: [],
+        fallbackUsed: false,
+        dbCacheUsed: false,
+        error: probe.message,
+        endpointsUsed: [],
+        fieldProviders: {},
+      };
+    }
+  }
+
   const encodedMint = encodeURIComponent(mint);
   const endpoints = [
     `/account/transactions?address=${encodedMint}&limit=8`,
