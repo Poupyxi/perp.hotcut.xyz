@@ -172,6 +172,63 @@ function runNftMigrations(database: DatabaseSync) {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (provider, scan_type)
     );
+
+    CREATE TABLE IF NOT EXISTS collector_crypt_snapshots (
+      id TEXT PRIMARY KEY,
+      snapshot_at TEXT NOT NULL,
+      total_listings_found INTEGER,
+      listings_stored INTEGER,
+      error_message TEXT,
+      is_complete INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS collector_crypt_listings (
+      id TEXT PRIMARY KEY,
+      mint TEXT NOT NULL,
+      marketplace TEXT,
+      listing_id TEXT,
+      listing_price REAL,
+      listing_currency TEXT,
+      seller TEXT,
+      listed_at TEXT,
+      snapshot_id TEXT NOT NULL,
+      listing_status TEXT NOT NULL DEFAULT 'active',
+      previous_listing_status TEXT,
+      verification_status TEXT,
+      verification_attempts INTEGER NOT NULL DEFAULT 0,
+      verification_next_retry_at TEXT,
+      verification_tx_hash TEXT,
+      verification_timestamp TEXT,
+      is_current_snapshot INTEGER NOT NULL DEFAULT 1,
+      raw_payload_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (snapshot_id) REFERENCES collector_crypt_snapshots(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS collector_crypt_verification_queue (
+      id TEXT PRIMARY KEY,
+      mint TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      previous_listing_price REAL,
+      previous_listing_at TEXT,
+      previous_owner TEXT,
+      current_owner TEXT,
+      helius_check_owner_at TEXT,
+      helius_check_owner TEXT,
+      helius_check_activity_at TEXT,
+      helius_check_activity TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      result TEXT,
+      result_tx_hash TEXT,
+      result_timestamp TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at TEXT,
+      next_retry_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   database.prepare(`
@@ -255,6 +312,16 @@ function runNftMigrations(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_rwa_nft_events_price_change_direction ON rwa_nft_events(price_change_direction);
     CREATE INDEX IF NOT EXISTS idx_provider_scan_status_type ON provider_scan_status(scan_type);
     CREATE INDEX IF NOT EXISTS idx_provider_scan_status_status ON provider_scan_status(status);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_snapshots_at ON collector_crypt_snapshots(snapshot_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_collector_crypt_mint_snapshot ON collector_crypt_listings(mint, snapshot_id);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_mint ON collector_crypt_listings(mint);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_status ON collector_crypt_listings(listing_status);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_verification_status ON collector_crypt_listings(verification_status);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_is_current ON collector_crypt_listings(is_current_snapshot);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_next_retry ON collector_crypt_listings(verification_next_retry_at);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_queue_mint ON collector_crypt_verification_queue(mint);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_queue_status ON collector_crypt_verification_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_collector_crypt_queue_next_retry ON collector_crypt_verification_queue(next_retry_at);
   `);
 }
 

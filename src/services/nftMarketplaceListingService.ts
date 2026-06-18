@@ -1,3 +1,6 @@
+import type { DatabaseSync } from "node:sqlite";
+import { getNftDb } from "./nftSqliteDb";
+
 type ListingProviderId = "magic-eden" | "tensor" | "phygitals" | "collector-crypt";
 type RuntimeEnv = Record<string, string | undefined>;
 type ProviderCheckStatus = "found" | "not_found" | "needs_api_key" | "needs_endpoint" | "disabled" | "error";
@@ -161,6 +164,44 @@ function normalizeListing(providerId: ListingProviderId, fallbackMarketplace: st
   };
 }
 
+async function fetchCollectorCryptListingFromSnapshot(mint: string): Promise<ActiveMintListing | null> {
+  if (!providerEnabled("COLLECTOR_CRYPT_ENABLED")) return null;
+
+  try {
+    const db = getNftDb();
+    const row = db
+      .prepare(
+        `SELECT listing_id, marketplace, listing_price, listing_currency, seller, listed_at, raw_payload_json
+         FROM collector_crypt_listings
+         WHERE mint = ? AND is_current_snapshot = 1 AND listing_status = 'active'
+         ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .get(mint) as {
+      listing_id?: string;
+      marketplace?: string;
+      listing_price?: number;
+      listing_currency?: string;
+      seller?: string;
+      listed_at?: string;
+      raw_payload_json?: string;
+    } | undefined;
+
+    if (!row) return null;
+
+    return normalizeListing("collector-crypt", row.marketplace || "Collector Crypt", {
+      listingId: row.listing_id,
+      marketplace: row.marketplace,
+      priceSol: row.listing_price,
+      listedAt: row.listed_at,
+      seller: row.seller,
+      rawPayload: row.raw_payload_json ? JSON.parse(row.raw_payload_json) : undefined,
+    });
+  } catch (error) {
+    console.error("[Collector Crypt Snapshot] Error fetching listing:", error);
+    return null;
+  }
+}
+
 async function fetchMagicEdenListing(mint: string): Promise<ActiveMintListing | null> {
   if (!providerEnabled("MAGIC_EDEN_ENABLED")) return null;
   const runtime = env();
@@ -308,24 +349,40 @@ export async function lookupActiveListingByMint(mint: string): Promise<ActiveMin
     providersChecked.push({ providerId: "phygitals", status: "disabled", message: "Provider not connected." });
   }
 
-  if (providerEnabled("COLLECTOR_CRYPT_ENABLED") && runtime.COLLECTOR_CRYPT_API_URL) {
-    const collectorCryptListing = await tryProvider(
-      "collector-crypt",
-      () => fetchGenericListing("collector-crypt", runtime.COLLECTOR_CRYPT_API_URL ?? "", mint, {
-        apiKey: runtime.COLLECTOR_CRYPT_API_KEY,
-        apiKeyHeader: "Authorization",
-        mintParam: "mint",
-      }),
-    );
-    if (collectorCryptListing) {
+  // Collector Crypt: check snapshot first, then fallback to API if configured
+  if (providerEnabled("COLLECTOR_CRYPT_ENABLED")) {
+    const snapshotListing = await tryProvider("collector-crypt", () => fetchCollectorCryptListingFromSnapshot(mint));
+    if (snapshotListing) {
       return {
         mint,
         found: true,
-        listing: collectorCryptListing,
+        listing: snapshotListing,
         providersChecked,
-        reason: "Collector Crypt active listing found",
+        reason: "Collector Crypt active listing found (from snapshot)",
         verificationStatus: "verified_listed",
       };
+    }
+
+    // Fallback to API if configured and snapshot didn't have it
+    if (runtime.COLLECTOR_CRYPT_API_URL) {
+      const collectorCryptListing = await tryProvider(
+        "collector-crypt",
+        () => fetchGenericListing("collector-crypt", runtime.COLLECTOR_CRYPT_API_URL ?? "", mint, {
+          apiKey: runtime.COLLECTOR_CRYPT_API_KEY,
+          apiKeyHeader: "Authorization",
+          mintParam: "mint",
+        }),
+      );
+      if (collectorCryptListing) {
+        return {
+          mint,
+          found: true,
+          listing: collectorCryptListing,
+          providersChecked,
+          reason: "Collector Crypt active listing found (from API)",
+          verificationStatus: "verified_listed",
+        };
+      }
     }
   } else {
     providersChecked.push({ providerId: "collector-crypt", status: "disabled", message: "Provider not connected." });

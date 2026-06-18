@@ -47,6 +47,11 @@ export function computeScanPriority(row: {
     return { priority: "listed", reason: "listing_verification_status=verified_listed" };
   }
 
+  // hot priority for listings pending Helius verification
+  if (vs === "pending_verification") {
+    return { priority: "hot", reason: "listing_verification_pending_helius_check" };
+  }
+
   const now = Date.now();
   const activityMs = row.last_activity_at ? new Date(row.last_activity_at).getTime() : null;
 
