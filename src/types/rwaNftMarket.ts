@@ -13,7 +13,8 @@ export type RwaNftMarketEventSource =
   | "magiceden"
   | "tensor"
   | "discord"
-  | "manual";
+  | "manual"
+  | "collector-crypt-verification";
 
 export type NFTMarketStatus =
   | "owned"

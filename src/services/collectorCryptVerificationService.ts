@@ -1,7 +1,7 @@
 import type { RwaNftMarketEvent } from "@/types/rwaNftMarket";
 import { getNftDb } from "./nftSqliteDb";
 import { fetchWithHeliusKey, hasHeliusApiKey } from "./heliusApiKeyRotation";
-import { saveRwaNftMarketEvent } from "./rwaNftMarketEventService";
+import { saveRwaNftMarketEvent, dedupeMarketEvent, updateNftAssetFromMarketEvent } from "./rwaNftMarketEventService";
 import { isCompressedNft, isCompressedNftTransfer } from "./heliusCompressedNftParser";
 import { hasValidPaymentEvidence, analyzePaymentEvidence } from "./heliusSolUsdcPaymentDetector";
 
@@ -13,6 +13,9 @@ export interface VerificationEvidence {
   timestamp: string | null;
   manualReview: boolean;
   evidence: string[];
+  paymentMint?: string | null; // "SOL" or USDC mint address
+  paymentSymbol?: string | null; // "SOL" or "USDC"
+  paymentAmount?: number | null; // Amount in native units (SOL or USDC)
 }
 
 interface HeliusAsset {
@@ -387,6 +390,7 @@ export async function verifyDisappearedListing(input: {
   if (ownerChanged) {
     // SOLD: owner changed + NFT transfer + valid SOL/USDC payment
     if (bestSaleCandidate?.hasValidPayment && bestSaleCandidate?.hasNftTransfer) {
+      const paymentMint = bestSaleCandidate.paymentType === "SOL" ? "SOL" : "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // USDC mint
       evidence.push(`✓ SOLD: Owner changed + NFT transfer + ${bestSaleCandidate.paymentType} payment`);
       return {
         result: "sold",
@@ -394,6 +398,9 @@ export async function verifyDisappearedListing(input: {
         timestamp: bestSaleCandidate.timestamp,
         manualReview: false,
         evidence,
+        paymentMint,
+        paymentSymbol: bestSaleCandidate.paymentType,
+        paymentAmount: bestSaleCandidate.paymentAmount,
       };
     }
 
@@ -535,13 +542,17 @@ export async function processCollectorCryptVerificationQueue(): Promise<{
            WHERE mint = ? AND is_current_snapshot = 0`,
         ).run(verification.result, `verified_${verification.result}`, verification.txHash, verification.timestamp, updateNow, item.mint);
 
-        // Create appropriate event only if verification is confident
+        // Create appropriate event only if verification is confident and not a duplicate
         if (verification.result === "sold" && verification.txHash) {
           const saleEvent: RwaNftMarketEvent = {
             mint: item.mint,
+            category: null,
             eventType: "SALE",
             priceSol: null,
             priceUsd: null,
+            paymentMint: verification.paymentMint,
+            paymentSymbol: verification.paymentSymbol,
+            paymentAmount: verification.paymentAmount,
             marketplace: "Collector Crypt",
             txSignature: verification.txHash,
             buyer: null,
@@ -553,16 +564,25 @@ export async function processCollectorCryptVerificationQueue(): Promise<{
           };
 
           try {
-            await saveRwaNftMarketEvent(saleEvent, { includeStaging: true });
+            const isDuplicate = await dedupeMarketEvent(saleEvent);
+            if (!isDuplicate) {
+              await saveRwaNftMarketEvent(saleEvent, { includeStaging: true });
+              // Update nft_assets after successful event creation
+              await updateNftAssetFromMarketEvent(saleEvent);
+            }
           } catch (error) {
             console.error(`[Collector Crypt] Failed to save SALE event for ${item.mint}:`, error);
           }
         } else if (verification.result === "transferred" && verification.txHash) {
           const transferEvent: RwaNftMarketEvent = {
             mint: item.mint,
+            category: null,
             eventType: "TRANSFER",
             priceSol: null,
             priceUsd: null,
+            paymentMint: null,
+            paymentSymbol: null,
+            paymentAmount: null,
             marketplace: null,
             txSignature: verification.txHash,
             buyer: null,
@@ -574,28 +594,42 @@ export async function processCollectorCryptVerificationQueue(): Promise<{
           };
 
           try {
-            await saveRwaNftMarketEvent(transferEvent, { includeStaging: true });
+            const isDuplicate = await dedupeMarketEvent(transferEvent);
+            if (!isDuplicate) {
+              await saveRwaNftMarketEvent(transferEvent, { includeStaging: true });
+              // Update nft_assets after successful event creation
+              await updateNftAssetFromMarketEvent(transferEvent);
+            }
           } catch (error) {
             console.error(`[Collector Crypt] Failed to save TRANSFER event for ${item.mint}:`, error);
           }
-        } else if (verification.result === "delisted") {
+        } else if (verification.result === "delisted" && verification.txHash) {
           const delistEvent: RwaNftMarketEvent = {
             mint: item.mint,
+            category: null,
             eventType: "DELISTED",
             priceSol: null,
             priceUsd: null,
+            paymentMint: null,
+            paymentSymbol: null,
+            paymentAmount: null,
             marketplace: "Collector Crypt",
-            txSignature: null,
+            txSignature: verification.txHash,
             buyer: null,
             seller: null,
             owner: null,
-            eventAt: updateNow,
+            eventAt: verification.timestamp || updateNow,
             source: "collector-crypt-verification",
             rawPayload: { evidence: verification.evidence },
           };
 
           try {
-            await saveRwaNftMarketEvent(delistEvent, { includeStaging: true });
+            const isDuplicate = await dedupeMarketEvent(delistEvent);
+            if (!isDuplicate) {
+              await saveRwaNftMarketEvent(delistEvent, { includeStaging: true });
+              // Update nft_assets after successful event creation
+              await updateNftAssetFromMarketEvent(delistEvent);
+            }
           } catch (error) {
             console.error(`[Collector Crypt] Failed to save DELISTED event for ${item.mint}:`, error);
           }

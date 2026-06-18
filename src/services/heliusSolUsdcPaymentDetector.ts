@@ -3,8 +3,8 @@
  * Uses raw balance changes to verify payment
  */
 
-// Official mainnet USDC mint
-const USDC_MINT = "EPjFWaLb3odcccccccccccccccccccccccccccccccc";
+// Official Solana mainnet USDC mint (USDC token on Solana)
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 export interface PaymentEvidence {
   hasSolPayment: boolean;
