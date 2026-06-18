@@ -42,25 +42,54 @@ async function fetchCollectorCryptListingsPage(page: number, limit: number): Pro
   total: number;
   totalPages: number;
   hasMore: boolean;
+  httpStatus?: number;
+  rateLimitInfo?: { retryAfter?: string; remaining?: string };
 }> {
   // Use official Collector Crypt API
   const baseUrl = "https://api.collectorcrypt.com";
   const endpoint = "/marketplace";
 
   const url = new URL(endpoint, baseUrl);
-  // Official API uses: categories, marketplaceStatus, marketplaceSource, page, step
   url.searchParams.set("categories", "Pokemon");
   url.searchParams.set("marketplaceStatus", "Buy now");
   url.searchParams.set("marketplaceSource", "CC");
   url.searchParams.set("page", String(page));
   url.searchParams.set("step", String(limit));
 
+  // Add randomized delay before fetching (3-5 seconds for better rate limit handling)
+  const delayMs = 3000 + Math.random() * 2000;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+
   const response = await fetch(url.toString(), {
-    headers: { accept: "application/json" },
+    headers: {
+      accept: "application/json",
+      "user-agent": "Mozilla/5.0 (compatible; CollectorCryptSync/1.0; +https://collectorcrypt.com)",
+    },
     signal: AbortSignal.timeout(30_000),
   });
 
+  // Extract rate limit headers for logging
+  const rateLimitInfo = {
+    retryAfter: response.headers.get("retry-after") || undefined,
+    remaining: response.headers.get("x-ratelimit-remaining") || undefined,
+  };
+
   if (!response.ok) {
+    // Log error details
+    const errorBody = await response.text();
+    const sanitized = errorBody.substring(0, 200).replace(/[\n\r]/g, " ");
+    console.error(`[CC API] Page ${page}: HTTP ${response.status}`);
+    console.error(`[CC API] Rate limit info:`, rateLimitInfo);
+    if (errorBody.includes("<!DOCTYPE")) {
+      console.error(`[CC API] Error: HTML error page (likely rate limit)`);
+    } else {
+      console.error(`[CC API] Error body: ${sanitized}`);
+    }
+
+    // Return error status for caller to handle
+    if (response.status === 403 || response.status === 429) {
+      throw new Error(`HTTP ${response.status}: Rate limited or forbidden`);
+    }
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }
 
@@ -72,9 +101,6 @@ async function fetchCollectorCryptListingsPage(page: number, limit: number): Pro
   const obj = data as Record<string, unknown>;
 
   // Official API response mapping:
-  // - listings array: filterNFtCard
-  // - total matching listings: findTotal
-  // - total pages: totalPages
   const items = Array.isArray(obj.filterNFtCard) ? obj.filterNFtCard : [];
   const total = typeof obj.findTotal === "number" ? obj.findTotal : 0;
   const totalPages = typeof obj.totalPages === "number" ? obj.totalPages : Math.ceil(total / limit);
@@ -87,6 +113,8 @@ async function fetchCollectorCryptListingsPage(page: number, limit: number): Pro
     total,
     totalPages,
     hasMore,
+    httpStatus: response.status,
+    rateLimitInfo,
   };
 }
 
@@ -98,27 +126,41 @@ function normalizeListings(items: unknown[]): CollectorCryptListing[] {
 
     const obj = item as Record<string, unknown>;
 
-    // Official Collector Crypt API mapping:
-    // - mint: nftAddress
-    // - listing ID: listing.receiptId (fallback to listing.sellerId if missing)
-    // - price: listing.price
-    // - currency: listing.currency
-    // - marketplace: listing.marketplace
-    // - createdAt: listing.createdAt
-    // - updatedAt: listing.updatedAt
-    // - seller: owner.wallet
-
+    // Official Collector Crypt API mapping
     const mint = String(obj.nftAddress || "").trim();
     const listingObj = obj.listing as Record<string, unknown> || {};
     const ownerObj = obj.owner as Record<string, unknown> || {};
 
-    // ListingId: use receiptId if available, fallback to sellerId
+    // Seller identification (prefer wallet, fallback to ownerId)
+    const seller = String(ownerObj.wallet || obj.ownerId || "").trim();
+
+    if (!mint || !seller) continue;
+
+    // ListingId: use receiptId if available
+    // If missing, generate deterministic ID from mint + seller + createdAt + price + currency
     let listingId = String(listingObj.receiptId || "").trim();
     if (!listingId) {
-      listingId = String(listingObj.sellerId || "").trim();
-    }
+      const createdAt = String(listingObj.createdAt || "").trim();
+      const price = listingObj.price;
+      const currency = String(listingObj.currency || "").trim();
 
-    if (!listingId || !mint) continue;
+      if (!createdAt || !price || !currency) {
+        // Skip listings without enough data to generate stable ID
+        continue;
+      }
+
+      // Generate deterministic ID from: mint + seller + createdAt + price + currency
+      // Use a simple hash-like approach: take first 8 chars of each component
+      const components = [
+        mint.substring(0, 8),
+        seller.substring(0, 8),
+        createdAt.substring(0, 10), // Date part only (YYYY-MM-DD)
+        String(price).substring(0, 6),
+        currency.substring(0, 4),
+      ].join("_");
+
+      listingId = `cc_${components}`;
+    }
 
     const listing: CollectorCryptListing = {
       provider: "collector-crypt",
@@ -127,7 +169,7 @@ function normalizeListings(items: unknown[]): CollectorCryptListing[] {
       marketplace: String(listingObj.marketplace || "").trim() || undefined,
       price: typeof listingObj.price === "number" ? listingObj.price : typeof listingObj.price === "string" ? parseFloat(listingObj.price as string) : undefined,
       currency: String(listingObj.currency || "").trim() || undefined,
-      seller: String(ownerObj.wallet || listingObj.sellerId || "").trim() || undefined,
+      seller,
       listedAt: String(listingObj.createdAt || "").trim() || undefined,
       updatedAt: String(listingObj.updatedAt || "").trim() || undefined,
       rawPayload: obj,
@@ -324,6 +366,16 @@ export async function syncCollectorCryptSnapshot(): Promise<SyncResult> {
         page++;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : "unknown error";
+
+        // On rate limiting (403/429), stop immediately and mark partial/failed
+        if (errorMsg.includes("403") || errorMsg.includes("429") || errorMsg.includes("Rate limited")) {
+          console.error(`[CC Sync] Rate limited on page ${page}. Stopping snapshot.`);
+          validationErrors.push(`Page ${page}: Rate limited (${errorMsg})`);
+          // Mark as partial if we have some data, failed if page 1
+          status = page === 1 ? "failed" : "partial";
+          break;
+        }
+
         validationErrors.push(`Page ${page} failed: ${errorMsg}`);
         if (page === 1) {
           status = "failed";
@@ -364,7 +416,8 @@ export async function syncCollectorCryptSnapshot(): Promise<SyncResult> {
       snapshotId,
     );
 
-    // Only compare if status is complete
+    // Only compare and queue if status is complete
+    // Partial/failed snapshots do NOT trigger disappeared listing detection
     let disappearedListingIds: string[] = [];
     if (status === "complete") {
       const previousSnapshot = getPreviousCompleteSnapshot(db);
@@ -411,14 +464,16 @@ export async function syncCollectorCryptSnapshot(): Promise<SyncResult> {
         }
 
         // Archive previous complete snapshot if new one is valid
-        if (previousSnapshot) {
-          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-          db.prepare("UPDATE collector_crypt_snapshots SET status='archived' WHERE id=? AND created_at < ?").run(
-            previousSnapshot.id,
-            sevenDaysAgo,
-          );
-        }
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        db.prepare("UPDATE collector_crypt_snapshots SET status='archived' WHERE id=? AND created_at < ?").run(
+          previousSnapshot.id,
+          sevenDaysAgo,
+        );
       }
+    } else {
+      // Partial/failed snapshots: keep previous complete snapshot active
+      // Don't archive anything, don't queue disappeared listings
+      console.log(`[CC Sync] Snapshot ${snapshotId} status: ${status}. Keeping previous complete snapshot active.`);
     }
 
     return {
