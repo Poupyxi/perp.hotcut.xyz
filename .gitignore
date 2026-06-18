@@ -35,3 +35,8 @@ data/*.sqlite-*
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables with secrets
+.env
+.env.local
+.env.*.local
