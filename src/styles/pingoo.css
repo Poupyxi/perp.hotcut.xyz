@@ -226,22 +226,19 @@ button:disabled { cursor: not-allowed; }
 .pack {
   min-width: 0;
   aspect-ratio: .72;
-  border: 1px solid rgba(255,255,255,.35);
-  border-radius: 9px 9px 5px 5px;
-  background: var(--pack-gradient);
+  border: none;
+  border-radius: 10px 10px 6px 6px;
+  background: transparent;
   color: #fff;
   position: relative;
-  padding: 8px 5px 7px;
+  padding: 0;
   cursor: pointer;
-  box-shadow: 0 14px 18px rgba(0,0,0,.38), inset 0 0 18px rgba(255,255,255,.1), 0 0 14px rgba(90,95,255,.18);
+  box-shadow: 0 14px 22px rgba(0,0,0,.5), 0 0 14px rgba(90,95,255,.18);
   transition: .22s ease;
   overflow: hidden;
 }
-.pack::before, .pack::after { content: ""; position: absolute; left: 5px; right: 5px; height: 2px; border-top: 1px dashed rgba(255,255,255,.45); }
-.pack::before { top: 5px; }
-.pack::after { bottom: 5px; }
-.pack:hover:not(:disabled), .pack.selected { transform: translateY(-9px) rotate(-1deg); filter: brightness(1.13); }
-.pack.selected { border-color: #fff; box-shadow: 0 0 0 2px var(--accent), 0 0 28px var(--accent-soft), 0 16px 22px rgba(0,0,0,.42); }
+.pack:hover:not(:disabled), .pack.selected { transform: translateY(-9px) rotate(-1deg); filter: brightness(1.12); }
+.pack.selected { box-shadow: 0 0 0 2px #fff, 0 0 28px rgba(255,255,255,.35), 0 16px 22px rgba(0,0,0,.5); }
 .pack:disabled { cursor: default; }
 .pack-shine { position: absolute; width: 24px; height: 150%; top: -25%; left: -40%; transform: rotate(22deg); background: rgba(255,255,255,.25); transition: .45s; }
 .pack:hover:not(:disabled) .pack-shine { left: 130%; }
@@ -2269,6 +2266,137 @@ footer { text-align: center; padding: 2px 20px 30px; color: #555c70; font-size: 
   .dashboard-savebar { align-items: stretch; flex-direction: column; }
   .dashboard-save-actions { width: 100%; }
   .dashboard-reset-button, .dashboard-save-button { flex: 1; }
+}
+
+/* ── pg-pack : nouveau design de booster ─────────────────────────── */
+.pg-pack__inner {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(160deg, var(--c1) 0%, var(--c2) 60%, var(--c3) 100%);
+  color: var(--ink);
+}
+
+/* Reflet diagonal */
+.pg-pack__sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, rgba(255,255,255,.22) 0%, transparent 55%);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Sertissage haut / bas */
+.pg-pack__crimp {
+  position: absolute;
+  left: 0; right: 0;
+  height: 18%;
+  z-index: 3;
+}
+.pg-pack__crimp--top {
+  top: 0;
+  background: linear-gradient(180deg, var(--crimp1) 0%, var(--crimp2) 100%);
+  border-bottom: 1px solid rgba(255,255,255,.18);
+}
+.pg-pack__crimp--bot {
+  bottom: 0;
+  background: linear-gradient(0deg, var(--crimp1) 0%, var(--crimp2) 100%);
+  border-top: 1px solid rgba(255,255,255,.18);
+}
+
+/* Effet holographique */
+.pg-pack__holo {
+  position: absolute;
+  inset: 18% 0;
+  background: repeating-linear-gradient(
+    105deg,
+    transparent 0px,
+    rgba(255,255,255,.04) 1px,
+    transparent 2px,
+    transparent 6px
+  );
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Badge tier (numéro) */
+.pg-pack__badge {
+  position: absolute;
+  top: 5%;
+  right: 8%;
+  font-size: clamp(7px, .65vw, 10px);
+  font-weight: 900;
+  letter-spacing: .06em;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 99px;
+  padding: 2px 5px;
+  z-index: 5;
+  color: var(--ink);
+}
+
+/* Zone centrale */
+.pg-pack__center {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6%;
+  flex: 1;
+  justify-content: center;
+  padding: 20% 0 10%;
+}
+
+/* Médaillon circulaire */
+.pg-pack__medallion {
+  width: clamp(32px, 3.2vw, 52px);
+  height: clamp(32px, 3.2vw, 52px);
+  border-radius: 50%;
+  background: var(--well);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.25), 0 4px 14px rgba(0,0,0,.55);
+}
+.pg-pack__icon {
+  width: 62%;
+  height: 62%;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 4px rgba(0,0,0,.5));
+}
+
+/* Nom de la marque */
+.pg-pack__brand {
+  font-size: clamp(6px, .58vw, 9px);
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  opacity: .85;
+  color: var(--ink);
+}
+
+/* Légende bas */
+.pg-pack__caption {
+  position: relative;
+  z-index: 5;
+  font-size: clamp(6px, .52vw, 8px);
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  opacity: .7;
+  padding-bottom: 22%;
+  color: var(--ink);
+}
+
+/* Pack sélectionné */
+.pack.selected .pg-pack__inner {
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.6);
 }
 
 /* Pack slot — wraps the pack button + price tag below */

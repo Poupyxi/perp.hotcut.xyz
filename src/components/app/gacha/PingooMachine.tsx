@@ -44,30 +44,35 @@ export const DEFAULT_PACKS = [
   {
     id: "tier-01", price: 0.1, badge: "01",
     gradient: "linear-gradient(155deg,#5be7ff,#174ba9 78%)",
+    packVars: { c1:"#4fa8ef", c2:"#1f5fb0", c3:"#3a7fd0", crimp1:"#103a66", crimp2:"#2c7bc0", well:"#0c1226", ink:"#fff" },
     odds: { jackpot: 1, win: 9, breakEven: 50, loss: 30, ultraLoss: 10 },
     ranges: { jackpot: [80, 120], win: [1, 79], breakEven: [0, 0], loss: [-10, -1], ultraLoss: [-20, -11] },
   },
   {
     id: "tier-02", price: 0.2, badge: "02",
     gradient: "linear-gradient(155deg,#6fffb0,#11654a 78%)",
+    packVars: { c1:"#3fc77e", c2:"#178050", c3:"#2ba068", crimp1:"#0c5236", crimp2:"#1f9460", well:"#081a12", ink:"#fff" },
     odds: { jackpot: 1, win: 10, breakEven: 50, loss: 30, ultraLoss: 9 },
     ranges: { jackpot: [80, 120], win: [1, 79], breakEven: [0, 0], loss: [-10, -1], ultraLoss: [-20, -11] },
   },
   {
     id: "tier-05", price: 0.5, badge: "05",
     gradient: "linear-gradient(155deg,#ffd764,#9a5314 78%)",
+    packVars: { c1:"#f0b94e", c2:"#a8761b", c3:"#d29a32", crimp1:"#6e4c12", crimp2:"#c08e2a", well:"#1c1405", ink:"#2a1e06" },
     odds: { jackpot: 2, win: 11, breakEven: 50, loss: 29, ultraLoss: 8 },
     ranges: { jackpot: [80, 120], win: [1, 79], breakEven: [0, 0], loss: [-10, -1], ultraLoss: [-20, -11] },
   },
   {
     id: "tier-10", price: 1, badge: "10",
     gradient: "linear-gradient(155deg,#ff75bd,#6c1d62 78%)",
+    packVars: { c1:"#d654a2", c2:"#8f2a66", c3:"#b53d86", crimp1:"#5e1c44", crimp2:"#a8347c", well:"#1c081a", ink:"#fff" },
     odds: { jackpot: 3, win: 12, breakEven: 50, loss: 28, ultraLoss: 7 },
     ranges: { jackpot: [80, 120], win: [1, 79], breakEven: [0, 0], loss: [-10, -1], ultraLoss: [-20, -11] },
   },
   {
     id: "tier-50", price: 5, badge: "50",
     gradient: "linear-gradient(155deg,#b58cff,#321578 78%)",
+    packVars: { c1:"#8a55f0", c2:"#4a23a0", c3:"#6a34c8", crimp1:"#2e1860", crimp2:"#5a2db0", well:"#120a26", ink:"#fff" },
     odds: { jackpot: 5, win: 15, breakEven: 50, loss: 25, ultraLoss: 5 },
     ranges: { jackpot: [80, 120], win: [1, 79], breakEven: [0, 0], loss: [-10, -1], ultraLoss: [-20, -11] },
   },
@@ -337,14 +342,28 @@ function AccessChoiceModal({ pack, onDemo, onWallet, onClose }: {
   );
 }
 
-function BoosterFace({ category, pack, compact = false }: { category: typeof CATEGORIES[0]; pack: Pack; compact?: boolean }) {
+function BoosterFace({ category, pack }: { category: typeof CATEGORIES[0]; pack: Pack; compact?: boolean }) {
+  const v = pack.packVars;
+  const style = {
+    "--c1": v.c1, "--c2": v.c2, "--c3": v.c3,
+    "--crimp1": v.crimp1, "--crimp2": v.crimp2,
+    "--well": v.well, "--ink": v.ink,
+  } as React.CSSProperties;
   return (
-    <>
-      <span className="pack-shine" />
-      <span className="pack-tier">{pack.badge}</span>
-      <span className="pack-icon">{category.img ? <img src={category.img} alt={category.name} /> : category.icon}</span>
-      {!compact && <small>{category.name}</small>}
-    </>
+    <div className="pg-pack__inner" style={style}>
+      <div className="pg-pack__sheen" />
+      <div className="pg-pack__crimp pg-pack__crimp--top" />
+      <div className="pg-pack__crimp pg-pack__crimp--bot" />
+      <div className="pg-pack__holo" />
+      <div className="pg-pack__center">
+        <div className="pg-pack__medallion">
+          {category.img
+            ? <img className="pg-pack__icon" src={category.img} alt={category.name} />
+            : <span className="pg-pack__icon">{category.icon}</span>}
+        </div>
+      </div>
+      <div className="pg-pack__caption">BOOSTER</div>
+    </div>
   );
 }
 
