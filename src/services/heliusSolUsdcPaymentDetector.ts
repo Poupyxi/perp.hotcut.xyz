@@ -77,7 +77,7 @@ export function detectSolPayment(tx: unknown): { found: boolean; amount: number 
 
 /**
  * Detect USDC payment by comparing token balance changes
- * Official mainnet USDC only: EPjFWaLb3odcccccccccccccccccccccccccccccccc
+ * Official mainnet USDC only: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
  */
 export function detectUsdcPayment(tx: unknown): { found: boolean; amount: number } {
   if (!tx || typeof tx !== "object") return { found: false, amount: 0 };
